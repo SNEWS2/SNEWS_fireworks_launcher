@@ -1,49 +1,32 @@
-# Environment variables
-.env
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual Environment
+# Virtual Environments
+hop-venv/
 venv/
-ENV/
 env/
 .venv/
 
-# Pytest
+# Environment Variables (Sensitive)
+.env
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
-coverage.xml
 
-# IDE
-.idea/
+# Logs
+*.log
+
+# IDE Specify
 .vscode/
-*.swp
-*.swo
+.idea/
 
-# Mac
+# OS Specific
 .DS_Store
+Thumbs.db
 
-# Kafka Data (Docker volume)
-kafka-data/
+# Project Specific
+gcn-schema/

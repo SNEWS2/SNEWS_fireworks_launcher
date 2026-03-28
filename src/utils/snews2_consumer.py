@@ -1,8 +1,9 @@
 """
-Kafka Consumer for SNEWS 2.0 Messages
+SNEWS 2.0 Verification Utility
 
-Subscribes to SNEWS2 alerts, validates incoming JSON against Pydantic models,
-and provides tier-aware pretty-printing.
+This is a DEVELOPER UTILITY for reading and verifying SNEWS 2.0 alerts 
+from Kafka. It provides tier-aware pretty-printing to help users confirm 
+that alerts are being correctly ingestion and bridged.
 """
 
 import json
@@ -13,7 +14,7 @@ from typing import Callable, Optional
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
-from .schemas.snews2_messages import (
+from ..schemas.snews2_messages import (
     SNEWS2MessageBase,
     Tier,
     parse_snews2_message,
@@ -103,6 +104,15 @@ class SNEWS2KafkaConsumer:
         return messages
 
     def consume_one(self, timeout_ms: int = 5000) -> Optional[SNEWS2MessageBase]:
+        """
+        Consume exactly one message from Kafka.
+        
+        Args:
+            timeout_ms: How long to wait for a message.
+            
+        Returns:
+            Validated message model or None if timeout.
+        """
         results = self.consume(timeout_ms=timeout_ms, max_messages=1)
         return results[0] if results else None
 
@@ -169,6 +179,7 @@ class SNEWS2KafkaConsumer:
         print("=" * 60 + "\n")
 
     def close(self) -> None:
+        """Close the Kafka consumer connection."""
         self._consumer.close()
         logger.info("SNEWS2 Consumer closed")
 

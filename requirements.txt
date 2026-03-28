@@ -16,3 +16,4 @@ python-dotenv
 
 # SNEWS2 Pub-Sub
 snews_pt
+gcn-kafka

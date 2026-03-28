@@ -139,7 +139,10 @@ class SNEWS2MessageBase(BaseModel):
 
     @model_validator(mode="after")
     def _auto_generate_id(self):
-        """Auto-generate human-readable ID if not provided."""
+        """
+        Auto-generate a human-readable ID if one was not provided during
+        initialization. Uses the detector name and machine time.
+        """
         if self.id is None:
             time_part = self.machine_time_utc or "unknown"
             tier_name = self.tier.value if hasattr(self.tier, 'value') else self.tier
@@ -248,16 +251,49 @@ class CoincidenceTierMessage(TierMessageBase):
     """
     tier: Tier = Field(default=Tier.COINCIDENCE_TIER)
 
-    neutrino_time_utc: str = Field(
+    detector_names: List[str] = Field(
         ...,
-        description="Time of the first neutrino (ISO 8601 with ns precision)",
+        description="Names of the detectors that observed the burst",
     )
 
-    @field_validator("neutrino_time_utc", mode="before")
+    neutrino_times_utc: List[str] = Field(
+        ...,
+        description="Times of the first neutrino for each detector (ISO 8601 with ns precision)",
+    )
+
+    p_values: List[float] = Field(
+        ...,
+        description="p-values of coincidence for each detector",
+    )
+
+    false_alarm_prob: Optional[float] = Field(
+        default=None,
+        description="Overall false alarm probability of the coincidence",
+    )
+
+    @field_validator("p_values")
+    @classmethod
+    def _validate_p_values(cls, v):
+        if any(p < 0 or p > 1 for p in v):
+            raise ValueError("All p-values must be between 0 and 1")
+        if len(v) == 0:
+            raise ValueError("p_values must contain at least one value")
+        return v
+        
+    @field_validator("false_alarm_prob")
+    @classmethod
+    def _validate_false_alarm_prob(cls, v):
+        """Ensure false_alarm_prob is within the valid [0, 1] range."""
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError("false_alarm_prob must be between 0 and 1")
+        return v
+
+    @field_validator("neutrino_times_utc", mode="before")
     @classmethod
     def _ensure_neutrino_time_string(cls, v):
-        if isinstance(v, datetime):
-            return v.isoformat()
+        """Convert a list of datetime objects to ISO strings."""
+        if isinstance(v, list):
+            return [t.isoformat() if isinstance(t, datetime) else t for t in v]
         return v
 
 
@@ -347,6 +383,7 @@ class TimingTierMessage(TierMessageBase):
     @field_validator("neutrino_time_utc", "start_time_utc", mode="before")
     @classmethod
     def _ensure_time_string(cls, v):
+        """Convert datetime objects to ISO strings."""
         if isinstance(v, datetime):
             return v.isoformat()
         return v

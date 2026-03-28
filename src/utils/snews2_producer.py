@@ -1,8 +1,9 @@
 """
-Kafka Producer for SNEWS 2.0 Messages
+SNEWS 2.0 Simulation Utility
 
-Publishes SNEWS2 JSON messages (all 5 tiers) to Kafka.
-Uses the same local Docker Kafka infrastructure as the legacy producer.
+This is a DEVELOPER UTILITY for simulating neutrino detector alerts. It 
+publishes SNEWS 2.0 JSON messages (all 5 tiers) to Kafka, allowing you to 
+test the GCN Bridge without needing a real link to a live detector.
 """
 
 import json
@@ -14,7 +15,7 @@ from typing import Optional, Callable
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
-from .schemas.snews2_messages import (
+from ..schemas.snews2_messages import (
     SNEWS2MessageBase,
     HeartbeatMessage,
     RetractionMessage,
@@ -68,6 +69,7 @@ class SNEWS2KafkaProducer:
         )
 
     def _on_send_success(self, record_metadata):
+        """Internal callback for successful Kafka publish."""
         logger.info(
             f"Message sent: topic={record_metadata.topic}, "
             f"partition={record_metadata.partition}, "
@@ -77,6 +79,7 @@ class SNEWS2KafkaProducer:
             self.on_success(record_metadata)
 
     def _on_send_error(self, exc):
+        """Internal callback for failed Kafka publish."""
         logger.error(f"Send failed: {exc}")
         if self.on_error:
             self.on_error(exc)
@@ -129,7 +132,6 @@ class SNEWS2KafkaProducer:
 
     def __enter__(self):
         return self
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.flush()
         self.close()
@@ -141,6 +143,7 @@ class SNEWS2KafkaProducer:
 # ---------------------------------------------------------------------------
 
 def _now_iso() -> str:
+    """Helper to get current UTC time in ISO format."""
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -158,9 +161,11 @@ def create_sample_coincidence(is_test: bool = True) -> CoincidenceTierMessage:
     """Create a sample coincidence tier message."""
     return CoincidenceTierMessage(
         detector_name="Super-K",
-        neutrino_time_utc=_now_iso(),
+        detector_names=["Super-K", "IceCube", "KamLAND"],
+        neutrino_times_utc=[_now_iso(), _now_iso(), _now_iso()],
         machine_time_utc=_now_iso(),
-        p_val=0.07,
+        p_values=[0.01, 0.05, 0.08],
+        false_alarm_prob=0.0001,
         is_test=is_test,
     )
 

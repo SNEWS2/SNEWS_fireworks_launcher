@@ -1,406 +1,135 @@
-# SNEWS Kafka Pipeline
+# SNEWS Fireworks Launcher
 
-A local development environment for translating **Legacy SNEWS 160-byte binary GCN packets** and **SNEWS 2.0 JSON messages** to modern formats, using Docker-based Kafka for air-gapped testing.
-
-## What This Does
-
-This pipeline supports two SNEWS generations:
-
-```
-Legacy SNEWS:
-  160-byte binary ──▶ Transformer ──▶ GCN Unified JSON ──▶ Kafka (snews-alerts)
-
-SNEWS 2.0 (via Hopskotch):
-  SCiMMA Hopskotch ──▶ snews_pt Listener ──▶ GCN Unified Schema ──▶ Kafka (snews2-gcn-alerts)
-```
-
-> [!NOTE]
-> Currently, we lack publishing credentials for NASA GCN. Therefore, the final step—publishing to GCN—is mocked by sending the unified JSON schema to a local Docker Kafka topic (`snews2-gcn-alerts`).
+A production-ready pipeline for "launching" **SNEWS 2.0 JSON messages** into standardized NASA GCN formats. This bridge acts as the central launcher for real-time supernova neutrino alerts, propagating them from the SCiMMA/Hopskotch network to the global astronomical community.
 
 ---
 
-## The Role of Kafka
-
-### Why Kafka?
-
-NASA's **GCN (General Coordinates Network)** uses Apache Kafka as its modern transport layer for astronomical alerts. When a supernova neutrino burst is detected by SNEWS, the alert flows through Kafka to observatories worldwide within seconds.
-
-```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────────────┐
-│   SNEWS     │ ──▶ │  NASA GCN Kafka │ ──▶ │  Observatories      │
-│  Detectors  │     │  (Broker)       │     │  (Consumers)        │
-└─────────────┘     └─────────────────┘     └─────────────────────┘
-```
-
-### Kafka Topics
-
-| Topic           | Format           | Source       |
-| --------------- | ---------------- | ------------ |
-| `snews-alerts`  | GCN Unified JSON | Legacy SNEWS |
-| `snews2-alerts` | SNEWS2 JSON      | SNEWS 2.0    |
-
-### Local Development with Docker
-
-```bash
-docker compose up -d  # Starts Kafka on localhost:9092 (KRaft mode)
-```
-
-**Benefits:** No credentials needed, air-gapped safe, real Kafka mechanics, one-line switch to production.
-
-### Going to Production
-
-```bash
-# .env
-KAFKA_BOOTSTRAP_SERVERS=kafka.gcn.nasa.gov:9092
-GCN_CLIENT_ID=your-client-id
-GCN_CLIENT_SECRET=your-client-secret
-```
-
-### Real vs. Test Notices
-
-Both legacy and SNEWS2 support test/real distinction:
-
-| Feature               | REAL Notice                     | TEST Notice              |
-| --------------------- | ------------------------------- | ------------------------ |
-| **Legacy bitflag**    | `trigger_id` Bit 1 = `0`        | `trigger_id` Bit 1 = `1` |
-| **SNEWS2 field**      | `is_test: false`                | `is_test: true`          |
-| **Downstream Action** | Telescopes **slew immediately** | Telescopes **log only**  |
-
-> [!NOTE]
-> Local Kafka is air-gapped. You can send "fake real" notices safely.
-
----
-
-## SNEWS 2.0 Integration
-
-SNEWS2 uses **JSON messages** over hopskotch-flavored Kafka (via [snews_pt](https://github.com/SNEWS2/SNEWS_Publishing_Tools)), with 5 distinct message tiers:
-
-### How Tier Messaging Works
-
-Unlike legacy SNEWS (a single 160-byte binary packet), SNEWS2 splits alerts into **5 specialized tiers**, each serving a different purpose in the supernova detection workflow.
-
-#### 1. Heartbeat — "I'm alive"
-
-The simplest tier. Detectors periodically send heartbeats to confirm they're online and operational. If heartbeats stop arriving, the network knows something is wrong.
-
-```json
-{ "tier": "Heartbeat", "detector_name": "Super-K", "detector_status": "ON" }
-```
-
-#### 2. CoincidenceTier — "Multiple detectors saw something!"
-
-The **core alert**. When two or more detectors independently detect a neutrino burst within a narrow time window, the SNEWS server generates a coincidence alert.
-
-Key field: **`p_val`** — the statistical probability that this coincidence is a false alarm. Lower = more likely a real supernova.
-
-```json
-{
-  "tier": "CoincidenceTier",
-  "detector_name": "Super-K",
-  "neutrino_time_utc": "2025-01-15T14:30:00.123456+00:00",
-  "p_val": 0.07,
-  "is_test": true
-}
-```
-
-#### 3. SignificanceTier — "Here's how significant it is"
-
-Provides **statistical significance over time bins**. Instead of a single p-value, it sends an array of `p_values[]` — each representing the false-alarm probability in successive time windows of width `t_bin_width_sec`. This lets scientists see whether the signal is growing stronger (real supernova) or fading (noise).
-
-#### 4. TimingTier — "Exactly when the neutrinos arrived"
-
-The most data-rich tier. Contains **precise arrival times of individual neutrinos** as nanosecond offsets from a reference `start_time_utc`. Critical for:
-
-- **Triangulating the supernova's sky position** (comparing arrival times across detectors at different locations on Earth)
-- **Studying neutrino physics** (oscillation, mass ordering)
-
-Supports two modes:
-
-- **Unbinned**: Raw nanosecond offsets (`[0, 303000, 659236, ...]`)
-- **Binned**: Histogram counts with a `time_bin_width_ns`
-
-#### 5. Retraction — "Never mind, false alarm"
-
-Allows a detector to **withdraw** a previous message — either by UUID (`retract_message_uuid`) or by count (`retract_latest_n`). Includes an optional `retraction_reason`.
-
-### Detection Flow
-
-A typical supernova detection sequence:
-
-```
-Time ──────────────────────────────────────────────────────▶
-
-Detector A: Heartbeat ── Heartbeat ── [burst!] ── TimingTier
-Detector B: Heartbeat ── Heartbeat ── [burst!] ── TimingTier
-                                          │
-                                          ▼
-                                 CoincidenceTier (server-generated)
-                                          │
-                                          ▼
-                                 SignificanceTier (p-values over time)
-                                          │
-                                 (if false alarm)
-                                          ▼
-                                    Retraction
-```
-
-### Common Fields
-
-Every tier shares a base set of fields:
-
-| Field                      | Purpose                                         |
-| -------------------------- | ----------------------------------------------- |
-| `uuid`                     | Unique message ID                               |
-| `detector_name`            | Which detector sent it                          |
-| `is_test` / `is_firedrill` | Flags to prevent accidental real alerts         |
-| `machine_time_utc`         | When the detector's clock generated the message |
-| `schema_version`           | For forward compatibility (`"0.2"` currently)   |
-
-### Tier Summary
-
-| Tier                 | Key Fields                                               | Purpose                        |
-| -------------------- | -------------------------------------------------------- | ------------------------------ |
-| **Heartbeat**        | `detector_status` (ON/OFF)                               | Detector health monitoring     |
-| **Retraction**       | `retract_message_uuid` or `retract_latest_n`             | Withdraw a previous alert      |
-| **CoincidenceTier**  | `neutrino_time_utc`, `p_val`                             | Multi-detector coincidence     |
-| **SignificanceTier** | `p_values[]`, `t_bin_width_sec`                          | Statistical burst significance |
-| **TimingTier**       | `neutrino_time_utc`, `timing_series[]`, `start_time_utc` | Precise arrival timing         |
-
-### Unified GCN Schema for SNEWS 2.0
-
-Because GCN expects a unified format rather than 5 distinct tier types, the pipeline automatically wraps received Hopskotch messages into a standard `SNEWS2GCNNotice` envelope. This is the schema that will be ultimately published to NASA GCN:
-
-```json
-{
-  "schema_version": "1.0",
-  "gcn_notice_type": "SNEWS2_ALERT",
-  "is_test": true,
-  "is_firedrill": true,
-  "snews2_tier": "CoincidenceTier",
-  "snews2_message_uuid": "...",
-  "detector_name": "Super-K",
-  "event_time_utc": "2025-01-15T14:30:00.123456+00:00",
-  "tier_data": {
-    "p_val": 0.07
-  }
-}
-```
-
-_Note: Tier-specific fields (like `p_val`, `timing_series`, or `detector_status`) are dynamically nested inside the `tier_data` object._
-
-### Listening to SNEWS2 Alerts (Hopskotch)
-
-This is the primary ingestion method for SNEWS2. We use `snews_pt` to listen to SCiMMA and route it through our GCN transformer.
-
-```bash
-# Subscribe to the test/firedrill network and mock publish to local Kafka
-python -m src.cli snews2-hopskotch-listen --firedrill
-
-# Subscribe to the LIVE production network (requires Hopskotch credentials in ~/.config/hop/auth.toml)
-python -m src.cli snews2-hopskotch-listen --no-firedrill
-```
-
-### Producing Mock SNEWS2 Alerts (Local Testing)
-
-If you wish to bypass Hopskotch entirely for local testing, you can produce mock SNEWS2 alerts directly into Kafka:
-
-```bash
-# Send a sample coincidence alert (test)
-python -m src.cli snews2-produce --tier coincidence --test
-```
-
-### Subscribing to SNEWS2 Alerts
-
-```bash
-# Subscribe and display all incoming alerts (Ctrl+C to stop)
-python -m src.cli snews2-consume
-
-# Consume a specific number of messages
-python -m src.cli snews2-consume --count 5
-```
-
-<!-- Note: The hopskotch listener acts as the primary subscriber to SNEWS announcements.
-     The `snews2-consume` command is just an internal viewer to verify messages made it into the local Kafka mock. -->
-
-### Preview SNEWS2 JSON (No Kafka)
-
-```bash
-# Show JSON output for any tier
-python -m src.cli snews2-transform --tier timing
-python -m src.cli snews2-transform --tier significance --test
-```
-
-### Schema Comparison: Legacy vs SNEWS2
-
-| Feature            | Legacy SNEWS            | SNEWS 2.0                            |
-| ------------------ | ----------------------- | ------------------------------------ |
-| **Wire format**    | 160-byte binary         | JSON                                 |
-| **Transport**      | GCN socket → Kafka      | Hopskotch Kafka                      |
-| **Timestamps**     | TJD + SOD               | ISO 8601 (nanosecond)                |
-| **Coordinates**    | RA/Dec (Super-K only)   | Not included (aggregated separately) |
-| **Detectors**      | 7 detectors in bitflags | Named detectors (expandable)         |
-| **Test flag**      | Bitflag in `trigger_id` | `is_test` boolean                    |
-| **Message types**  | 1 (type 149)            | 5 tiers                              |
-| **Schema version** | Implicit                | Explicit (`schema_version`)          |
-
----
-
-## Legacy GCN SNEWS Schema
-
-### Binary Packet Format (Type 149)
-
-GCN socket packets are **40 × 4-byte unsigned integers** (160 bytes total) in network byte order (big-endian).
-
-| Position | Field           | Encoding | Description                     |
-| -------- | --------------- | -------- | ------------------------------- |
-| 0        | `pkt_type`      | uint32   | Always 149 for SNEWS            |
-| 4        | `trigger_num`   | uint32   | Unique event serial number      |
-| 5        | `event_tjd`     | uint32   | Truncated Julian Day            |
-| 6        | `event_sod`     | uint32   | Seconds-of-day × 100            |
-| 7        | `event_ra`      | uint32   | RA × 10000 (degrees)            |
-| 8        | `event_dec`     | int32    | Dec × 10000 (degrees, signed)   |
-| 9        | `event_fluence` | uint32   | Neutrino count                  |
-| 10       | `event_error`   | uint32   | Error radius × 10000            |
-| 11       | `event_cont`    | uint32   | Containment % × 100             |
-| 12       | `duration`      | uint32   | Duration × 100 (seconds)        |
-| 18       | `trigger_id`    | uint32   | Notice type bitflags            |
-| 19       | `misc`          | uint32   | Detector participation bitflags |
-
-### Trigger ID Bitflags
-
-```
-Bit 0: Sub-type       (0=Individual, 1=Coincidence)
-Bit 1: Test flag      (0=Real, 1=Test)
-Bit 2: RA/Dec defined (0=Defined, 1=Undefined - no Super-K)
-Bit 5: Retraction     (0=No, 1=Yes - not a supernova)
-```
-
-### Detector Participation Bitflags
-
-```
-Bits 0-3:   Super-Kamiokande    Bits 16-19: Borexino
-Bits 4-7:   LVD                 Bits 20-23: Daya Bay
-Bits 8-11:  IceCube             Bits 24-27: HALO
-Bits 12-15: KamLAND
-```
-
-Each detector has 4 bits: participated, possible, good, override.
-
-### Timestamp Conversion
-
-```python
-# TJD epoch: May 24, 1968 (JD 2440000.5)
-event_time = TJD_EPOCH + timedelta(days=tjd) + timedelta(seconds=sod)
+## 🚀 Core Functionality
+
+This bridge acts as a **Pass-through Translation** service:
+1.  **Listen**: Subscribes to SNEWS 2.0 alerts via the `snews_pt` (Hopskotch) network.
+2.  **Transform**: Maps scientific neutrino data into a unified GCN-compatible JSON schema.
+3.  **Publish**: Forwards the transformed alerts to NASA GCN (mocked via local Kafka by default).
+
+```mermaid
+graph LR
+    subgraph SCiMMA_Network
+    S[SNEWS 2.0 Alerts]
+    end
+    
+    subgraph GCN_Bridge_Server
+    B[GCN Bridge Plugin]
+    T[GCN Transformer]
+    end
+    
+    subgraph NASA_GCN
+    K[GCN Kafka Brokers]
+    end
+
+    S --> B
+    B --> T
+    T --> K
 ```
 
 ---
 
-## Quick Start
+## 📂 Project Structure & File Guide
 
-### 1. Install Dependencies
+### Core Logic (`src/`)
+*   **[gcn_bridge.py](file:///Users/medhansh29/SNEWS_KAFKA/src/gcn_bridge.py)**: The **Primary Entry Point**. This is the core "Bridge" component that listens to Hopskotch and publishes to GCN. It includes logic to switch between mock and real GCN credentials.
+*   **[cli.py](file:///Users/medhansh29/SNEWS_KAFKA/src/cli.py)**: The command-line interface providing access to the bridge and all simulation utilities.
+*   **[schemas/snews2_messages.py](file:///Users/medhansh29/SNEWS_KAFKA/src/schemas/snews2_messages.py)**: Contains the internal SNEWS 2.0 Pydantic models for all 5 tiers (Heartbeat, Coincidence, Significance, Timing, Retraction). Handles rigorous validation.
+*   **[schemas/snews2_gcn_schema.py](file:///Users/medhansh29/SNEWS_KAFKA/src/schemas/snews2_gcn_schema.py)**: Defines the mapping between SNEWS-specific data and the official NASA GCN Unified format.
 
-```bash
-pip install -r requirements.txt
-```
+### Utilities (`src/utils/`)
+*   **[snews2_producer.py](file:///Users/medhansh29/SNEWS_KAFKA/src/utils/snews2_producer.py)**: **Simulation Utility**. Used to generate mock SNEWS 2.0 alerts to simulate a neutrino detector.
+*   **[snews2_consumer.py](file:///Users/medhansh29/SNEWS_KAFKA/src/utils/snews2_consumer.py)**: **Verification Utility**. A Kafka consumer that pretty-prints bridged alerts for human inspection.
 
-### 2. Setup Hopskotch Authentication (For SNEWS2 Live Data)
-
-```bash
-hop auth add
-```
-
-_(Provide your SCiMMA Username, Password, and `kafka.scimma.org` as the hostname)._
-
-### 3. Start Local Kafka (GCN Mock)
-
-```bash
-docker compose up -d
-```
-
-### 4. Test the Pipeline
-
-```bash
-# Legacy SNEWS
-python -m src.cli transform --sample
-python -m src.cli produce --sample --test
-python -m src.cli consume --count 1
-
-# SNEWS2 (Listen -> Mock GCN)
-python -m src.cli snews2-hopskotch-listen --firedrill
-python -m src.cli snews2-consume --count 1
-```
+### Test Suite (`tests/`)
+*   **[test_snews2.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_snews2.py)**: Unit tests for SNEWS 2.0 message validation and constraints.
+*   **[test_snews2_gcn_schema.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_snews2_gcn_schema.py)**: Unit tests verifying the transformation from SNEWS to GCN formats.
+*   **[test_integration.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_integration.py)**: End-to-end integration tests using a live Kafka broker (Docker).
 
 ---
 
-## CLI Commands
+## 🛠 Operation Modes
+
+### 🚀 Mode A: The Live Bridge (Production)
+
+This mode connects to the live SCiMMA network to bridge real astronomical data. It operates along two configurable axes:
+
+#### 1. Ingest Axis (SCiMMA Input)
+*   **Firedrill Alerts (Frequent)**: The primary **testing vehicle**. You subscribe to the live SCiMMA Firedrill topic to verify your full pipeline with real-world message frequency.
+*   **Real Alerts (Rare)**: High-confident astronomical events. Use this for the final production deployment. In this mode, the bridge **continuously listens** in the background, ready to translate and forward a real Galactic Supernova alert the instant it occurs.
+
+#### 2. Publishing Axis (GCN Output)
+*   **GCN Mock (Local)**: Publishes to your local Docker Kafka. Ideal for local verification without needing NASA credentials.
+*   **NASA GCN (Production)**: The final destination. Requires valid GCN Kafka credentials.
+
+| Use Case | Ingest Axis | Publishing Axis | Configuration |
+| :--- | :--- | :--- | :--- |
+| **Active Testing**| **Firedrill** | **NASA GCN** | `--firedrill` + `USE_GCN_CREDENTIALS=true` |
+| **Real Watch** | **Real** | **NASA GCN** | `--no-firedrill` + `USE_GCN_CREDENTIALS=true` |
+| **Local Audit** | Firedrill | Local Docker | `--firedrill` + `USE_GCN_CREDENTIALS=false` |
+| **Simulated Dev** | Mock Ingest | Local Docker | Use Mode B (below) |
+
+### Mode B: The Simulation Pipeline (Development)
+
+Use this mode to test the GCN Bridge logic in a completely isolated environment by mocking the **SNEWS 2.0 Ingest** itself.
+
+1.  **Start GCN Mock (Docker)**:
+    ```bash
+    docker compose up -d
+    ```
+2.  **Start the Bridge**:
+    ```bash
+    # Listen to your local mock alerts and bridge to local GCN mock
+    python -m src.cli snews2-gcn-bridge --firedrill
+    ```
+3.  **Simulate an Inbound Detector Alert**:
+    In a separate terminal, use the Simulation Utility:
+    ```bash
+    python -m src.cli snews2-produce --tier coincidence --test
+    ```
+4.  **Verify GCN Notice Arrival**:
+    Use the Verification Utility to view the transformed result in the `snews2-gcn-alerts` topic:
+    ```bash
+    python -m src.cli snews2-consume
+    ```
+
+---
+
+## 🔐 Configuration & Credentials
+
+The bridge behavior is controlled via environment variables in your `.env` file. Proper authentication is required for both Axes of operation:
+
+### 1. Ingest Axis (SCiMMA)
+To listen to the live SNEWS 2.0 network, you must authenticate once on your machine:
+```bash
+hop auth add  # Use scimma credentials
+```
+
+### 2. Publishing Axis (NASA GCN)
+To publish to the actual NASA GCN, set the following in `.env`:
+*   `USE_GCN_CREDENTIALS=true`
+*   `GCN_CLIENT_ID` / `GCN_CLIENT_SECRET`: Obtained from the NASA GCN portal.
+
+| Variable | Axis | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `KAFKA_BOOTSTRAP_SERVERS` | Output | Destination GCN Kafka brokers. | `localhost:9092` |
+| `USE_GCN_CREDENTIALS` | Output | Toggle between Mock (Docker) and Production (NASA). | `false` |
+| `SNEWS2_TOPIC` | Input | Internal topic used for simulation ingest. | `snews2-alerts` |
+
+---
+
+## 🧪 Testing
+
+Ensure your local Kafka is running (`docker compose up -d`), then run:
 
 ```bash
-# Legacy SNEWS
-python -m src.cli produce --sample --test  # Sample TEST notice
-python -m src.cli produce --file data.bin  # Process binary file
-python -m src.cli consume --count 5        # Consume N messages
-python -m src.cli transform --sample       # Preview JSON output
-
-# SNEWS2
-python -m src.cli snews2-hopskotch-listen --firedrill      # Listen to Hopskotch & publish to GCN mock
-python -m src.cli snews2-hopskotch-listen --no-firedrill   # Listen to LIVE Hopskotch
-python -m src.cli snews2-produce --tier coincidence --test # Local testing mock producer
-python -m src.cli snews2-consume                           # View messages arriving in GCN mock
-python -m src.cli snews2-transform --tier significance     # Preview SNEWS2 generated JSON
+pytest tests/ -v
 ```
 
 ---
-
-## Configuration
-
-Copy `.env.example` to `.env`:
-
-```bash
-# Local development
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-
-# Production (NASA GCN)
-# KAFKA_BOOTSTRAP_SERVERS=kafka.gcn.nasa.gov:9092
-```
-
----
-
-## Project Structure
-
-```
-src/
-├── cli.py                 # CLI (legacy + SNEWS2 commands)
-├── producer.py            # Legacy Kafka producer
-├── consumer.py            # Legacy Kafka consumer
-├── transformer.py         # Binary → JSON pipeline
-├── snews2_hopskotch_listener.py # Hopskotch -> GCN mock publisher
-├── snews2_producer.py     # SNEWS2 Kafka producer + mock generators
-├── snews2_consumer.py     # SNEWS2 Kafka consumer + pretty-print
-└── schemas/
-    ├── legacy_snews.py    # Binary parser + bitflags
-    ├── gcn_unified.py     # Legacy Pydantic JSON model
-    ├── snews2_gcn_schema.py # Custom SNEWS2 -> GCN envelope schema
-    └── snews2_messages.py # SNEWS2 Pydantic models (5 tiers)
-tests/
-├── test_transformer.py    # Legacy parser unit tests (13 tests)
-├── test_snews2.py         # SNEWS2 schema unit tests (29 tests)
-└── test_integration.py    # Kafka end-to-end tests
-```
-
----
-
-## Testing
-
-```bash
-pytest tests/ -v  # 42 tests total
-```
-
----
-
-## References
-
-- [GCN/SNEWS Notices](https://gcn.gsfc.nasa.gov/snews.html) - Legacy notice format
-- [GCN Socket Packet Definition](https://gcn.gsfc.nasa.gov/sock_pkt_def_doc.html) - Binary field layout
-- [SNEWS Network](http://snews.bnl.gov) - SuperNova Early Warning System
-- [snews_pt](https://github.com/SNEWS2/SNEWS_Publishing_Tools) - SNEWS 2.0 Publishing Tools
-- [snews-data-formats](https://github.com/SNEWS2/snews-data-formats) - SNEWS2 data models and schema
+> [!IMPORTANT]
+> To switch from **Mock Publishing** to **Actual GCN Publishing**, ensure `USE_GCN_CREDENTIALS=true` and provide your authorized GCN credentials in the `.env` file.

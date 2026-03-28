@@ -1,5 +1,5 @@
 """
-Integration tests for SNEWS Kafka Producer/Consumer.
+Integration tests for SNEWS 2.0 Kafka Producer/Consumer.
 
 Requires running Kafka instance (localhost:9092).
 """
@@ -7,52 +7,60 @@ Requires running Kafka instance (localhost:9092).
 import pytest
 import time
 import uuid
-from src.producer import SNEWSKafkaProducer
-from src.consumer import SNEWSKafkaConsumer
-from src.schemas.gcn_unified import SNEWSNotice
+import os
+from src.utils.snews2_producer import SNEWS2KafkaProducer, CoincidenceTierMessage
+from src.utils.snews2_consumer import SNEWS2KafkaConsumer
 
 @pytest.mark.integration
-class TestKafkaIntegration:
-    """Integration tests requiring running Kafka."""
+class TestSNEWS2KafkaIntegration:
+    """
+    Integration tests for the SNEWS 2.0 Kafka pipeline.
     
-    def test_produce_consume_cycle(self):
-        """Test full cycle: Produce -> Kafka -> Consume"""
+    Verifies that messages can be produced to, and consumed from, a 
+    live Kafka broker while maintaining schema integrity and 
+    tier-specific properties.
+    """
+    
+    def test_snews2_produce_consume_cycle(self):
+        """Test full cycle: Produce SNEWS2 -> Kafka -> Consume SNEWS2"""
         # Unique topic for this test to avoid interference
-        test_topic = f"snews-test-{uuid.uuid4()}"
+        test_topic = f"snews2-test-{uuid.uuid4()}"
         
         # 1. Produce a message
-        trigger_num = 999999
-        with SNEWSKafkaProducer(topic=test_topic) as producer:
-            # Create packet manually
-            from src.schemas.legacy_snews import LegacySNEWSParser
-            data = LegacySNEWSParser.create_mock_packet(
-                trigger_num=trigger_num,
+        detector_name = "TestDetector"
+        with SNEWS2KafkaProducer(topic=test_topic) as producer:
+            msg = CoincidenceTierMessage(
+                detector_name=detector_name,
+                detector_names=[detector_name],
+                neutrino_times_utc=["2025-01-15T14:30:00.123456+00:00"],
+                p_values=[0.1],
+                false_alarm_prob=0.01,
                 is_test=True
             )
-            producer.send_binary(data)
+            producer.send_message(msg)
             producer.flush()
         
         # 2. Consume the message
-        received_notice = None
+        received_msg = None
         
         # Give Kafka a moment to settle
         time.sleep(1)
         
-        with SNEWSKafkaConsumer(
+        with SNEWS2KafkaConsumer(
             topic=test_topic, 
             auto_offset_reset="earliest",
             group_id=f"test-group-{uuid.uuid4()}"
         ) as consumer:
             # Try to consume for up to 5 seconds
-            received_notices = consumer.consume(timeout_ms=5000, max_messages=1)
-            if received_notices:
-                received_notice = received_notices[0]
+            received_messages = consumer.consume(timeout_ms=5000, max_messages=1)
+            if received_messages:
+                received_msg = received_messages[0]
         
         # 3. Verify
-        assert received_notice is not None, "Failed to consume message"
-        assert isinstance(received_notice, SNEWSNotice)
-        assert received_notice.trigger_num == trigger_num
-        assert received_notice.notice_type == "TEST"
+        assert received_msg is not None, "Failed to consume SNEWS2 message"
+        assert received_msg.detector_name == detector_name
+        assert received_msg.tier == "CoincidenceTier"
+        assert received_msg.is_test is True
 
 if __name__ == "__main__":
     # Allow running directly

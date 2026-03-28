@@ -19,7 +19,7 @@ from src.schemas.snews2_messages import (
     Tier,
     parse_snews2_message,
 )
-from src.snews2_producer import (
+from src.utils.snews2_producer import (
     create_sample_heartbeat,
     create_sample_coincidence,
     create_sample_significance,
@@ -34,7 +34,10 @@ from src.snews2_producer import (
 # ---------------------------------------------------------------------------
 
 class TestHeartbeatMessage:
+    """Tests for the Heartbeat message tier (detector health)."""
+    
     def test_basic_creation(self):
+        """Verify that a heartbeat can be created with required fields."""
         msg = HeartbeatMessage(detector_name="Super-K", detector_status="ON")
         assert msg.tier == Tier.HEARTBEAT
         assert msg.detector_name == "Super-K"
@@ -65,7 +68,10 @@ class TestHeartbeatMessage:
 # ---------------------------------------------------------------------------
 
 class TestRetractionMessage:
+    """Tests for the Retraction message tier (alert withdrawal)."""
+
     def test_retract_by_uuid(self):
+        """Verify that a specific message can be retracted by its UUID."""
         msg = RetractionMessage(
             detector_name="Super-K",
             retract_message_uuid="abc-123-def",
@@ -108,36 +114,46 @@ class TestRetractionMessage:
 # ---------------------------------------------------------------------------
 
 class TestCoincidenceTierMessage:
+    """Tests for the Coincidence tier (multi-detector events)."""
+
     def test_basic_creation(self):
+        """Verify that a coincidence alert can be created with shared detector list."""
         now = datetime.now(timezone.utc).isoformat()
         msg = CoincidenceTierMessage(
             detector_name="Super-K",
-            neutrino_time_utc=now,
-            p_val=0.07,
+            detector_names=["Super-K", "IceCube"],
+            neutrino_times_utc=[now, now],
+            p_values=[0.07, 0.05],
         )
+        assert getattr(msg, "p_val", None) is None
+        assert getattr(msg, "neutrino_time_utc", None) is None
         assert msg.tier == Tier.COINCIDENCE_TIER
-        assert msg.p_val == 0.07
+        assert msg.p_values == [0.07, 0.05]
 
     def test_datetime_auto_conversion(self):
         """datetime objects should auto-convert to strings."""
         now = datetime.now(timezone.utc)
         msg = CoincidenceTierMessage(
             detector_name="KamLAND",
-            neutrino_time_utc=now,
+            detector_names=["KamLAND", "SNO+"],
+            neutrino_times_utc=[now, now],
+            p_values=[0.1, 0.2]
         )
-        assert isinstance(msg.neutrino_time_utc, str)
+        assert isinstance(msg.neutrino_times_utc[0], str)
+        assert msg.neutrino_times_utc[0] == now.isoformat()
 
     def test_p_val_range_validation(self):
         with pytest.raises(Exception):
             CoincidenceTierMessage(
                 detector_name="Super-K",
-                neutrino_time_utc=datetime.now(timezone.utc).isoformat(),
-                p_val=1.5,  # Out of range
+                detector_names=["Super-K"],
+                neutrino_times_utc=[datetime.now(timezone.utc).isoformat()],
+                p_values=[1.5],  # Out of range
             )
 
     def test_sample_generator(self):
         msg = create_sample_coincidence()
-        assert msg.neutrino_time_utc is not None
+        assert msg.neutrino_times_utc is not None
         assert msg.is_test is True
 
 
@@ -146,7 +162,10 @@ class TestCoincidenceTierMessage:
 # ---------------------------------------------------------------------------
 
 class TestSignificanceTierMessage:
+    """Tests for the Significance tier (statistical burst analysis)."""
+
     def test_basic_creation(self):
+        """Verify that a significance alert can be created with binned p-values."""
         msg = SignificanceTierMessage(
             detector_name="KamLAND",
             p_values=[0.43, 0.32, 0.09, 0.01],
@@ -182,7 +201,10 @@ class TestSignificanceTierMessage:
 # ---------------------------------------------------------------------------
 
 class TestTimingTierMessage:
+    """Tests for the Timing tier (high-precision arrival data)."""
+
     def test_unbinned_creation(self):
+        """Verify unbinned timing alerts with raw neutrino offsets (ns)."""
         now = datetime.now(timezone.utc).isoformat()
         msg = TimingTierMessage(
             detector_name="IceCube",
@@ -280,7 +302,10 @@ class TestCommonFields:
     def test_metadata_attachment(self):
         msg = CoincidenceTierMessage(
             detector_name="Super-K",
-            neutrino_time_utc=datetime.now(timezone.utc).isoformat(),
+            detector_names=["Super-K", "IceCube"],
+            neutrino_times_utc=[datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()],
+            p_values=[0.05, 0.01],
             meta={"run_id": 42, "notes": "calibration run"},
         )
         assert msg.meta["run_id"] == 42
+        assert msg.meta["notes"] == "calibration run"
