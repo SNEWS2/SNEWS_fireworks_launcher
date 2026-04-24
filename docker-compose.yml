@@ -33,5 +33,18 @@ services:
       timeout: 5s
       retries: 5
 
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: snews-test
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - USE_GCN_CREDENTIALS=false
+    depends_on:
+      kafka:
+        condition: service_healthy
+
 volumes:
   kafka-data:
+

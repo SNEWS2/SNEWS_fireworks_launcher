@@ -1,135 +1,83 @@
 # SNEWS Fireworks Launcher
 
-A production-ready pipeline for "launching" **SNEWS 2.0 JSON messages** into standardized NASA GCN formats. This bridge acts as the central launcher for real-time supernova neutrino alerts, propagating them from the SCiMMA/Hopskotch network to the global astronomical community.
+A production-ready pipeline for converting **SNEWS 2.0 messages** into standardized NASA GCN formats. This package acts as the central software bridge for real-time supernova neutrino alerts, propagating them from the SCiMMA/Hopskotch network to the global astronomical community via GCN.
+
+## 🌟 Data Schema Interoperability
+
+This package inherits its core data schemas from **[`snews-data-formats`](https://github.com/SNEWS2/snews-data-formats)** to ensure strict, typed validation of messages.
+*Note: As an interim step, we are currently integrating with an unmerged branch/PR of `snews-data-formats`. The Fireworks Launcher gracefully handles these upstream schemas as we push through PR validation.*
 
 ---
 
-## 🚀 Core Functionality
+## 🚀 Installation
 
-This bridge acts as a **Pass-through Translation** service:
-1.  **Listen**: Subscribes to SNEWS 2.0 alerts via the `snews_pt` (Hopskotch) network.
-2.  **Transform**: Maps scientific neutrino data into a unified GCN-compatible JSON schema.
-3.  **Publish**: Forwards the transformed alerts to NASA GCN (mocked via local Kafka by default).
+Ensure you have Python 3.10+ installed.
 
-```mermaid
-graph LR
-    subgraph SCiMMA_Network
-    S[SNEWS 2.0 Alerts]
-    end
-    
-    subgraph GCN_Bridge_Server
-    B[GCN Bridge Plugin]
-    T[GCN Transformer]
-    end
-    
-    subgraph NASA_GCN
-    K[GCN Kafka Brokers]
-    end
-
-    S --> B
-    B --> T
-    T --> K
-```
-
----
-
-## 📂 Project Structure & File Guide
-
-### Core Logic (`src/`)
-*   **[gcn_bridge.py](file:///Users/medhansh29/SNEWS_KAFKA/src/gcn_bridge.py)**: The **Primary Entry Point**. This is the core "Bridge" component that listens to Hopskotch and publishes to GCN. It includes logic to switch between mock and real GCN credentials.
-*   **[cli.py](file:///Users/medhansh29/SNEWS_KAFKA/src/cli.py)**: The command-line interface providing access to the bridge and all simulation utilities.
-*   **[schemas/snews2_messages.py](file:///Users/medhansh29/SNEWS_KAFKA/src/schemas/snews2_messages.py)**: Contains the internal SNEWS 2.0 Pydantic models for all 5 tiers (Heartbeat, Coincidence, Significance, Timing, Retraction). Handles rigorous validation.
-*   **[schemas/snews2_gcn_schema.py](file:///Users/medhansh29/SNEWS_KAFKA/src/schemas/snews2_gcn_schema.py)**: Defines the mapping between SNEWS-specific data and the official NASA GCN Unified format.
-
-### Utilities (`src/utils/`)
-*   **[snews2_producer.py](file:///Users/medhansh29/SNEWS_KAFKA/src/utils/snews2_producer.py)**: **Simulation Utility**. Used to generate mock SNEWS 2.0 alerts to simulate a neutrino detector.
-*   **[snews2_consumer.py](file:///Users/medhansh29/SNEWS_KAFKA/src/utils/snews2_consumer.py)**: **Verification Utility**. A Kafka consumer that pretty-prints bridged alerts for human inspection.
-
-### Test Suite (`tests/`)
-*   **[test_snews2.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_snews2.py)**: Unit tests for SNEWS 2.0 message validation and constraints.
-*   **[test_snews2_gcn_schema.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_snews2_gcn_schema.py)**: Unit tests verifying the transformation from SNEWS to GCN formats.
-*   **[test_integration.py](file:///Users/medhansh29/SNEWS_KAFKA/tests/test_integration.py)**: End-to-end integration tests using a live Kafka broker (Docker).
-
----
-
-## 🛠 Operation Modes
-
-### 🚀 Mode A: The Live Bridge (Production)
-
-This mode connects to the live SCiMMA network to bridge real astronomical data. It operates along two configurable axes:
-
-#### 1. Ingest Axis (SCiMMA Input)
-*   **Firedrill Alerts (Frequent)**: The primary **testing vehicle**. You subscribe to the live SCiMMA Firedrill topic to verify your full pipeline with real-world message frequency.
-*   **Real Alerts (Rare)**: High-confident astronomical events. Use this for the final production deployment. In this mode, the bridge **continuously listens** in the background, ready to translate and forward a real Galactic Supernova alert the instant it occurs.
-
-#### 2. Publishing Axis (GCN Output)
-*   **GCN Mock (Local)**: Publishes to your local Docker Kafka. Ideal for local verification without needing NASA credentials.
-*   **NASA GCN (Production)**: The final destination. Requires valid GCN Kafka credentials.
-
-| Use Case | Ingest Axis | Publishing Axis | Configuration |
-| :--- | :--- | :--- | :--- |
-| **Active Testing**| **Firedrill** | **NASA GCN** | `--firedrill` + `USE_GCN_CREDENTIALS=true` |
-| **Real Watch** | **Real** | **NASA GCN** | `--no-firedrill` + `USE_GCN_CREDENTIALS=true` |
-| **Local Audit** | Firedrill | Local Docker | `--firedrill` + `USE_GCN_CREDENTIALS=false` |
-| **Simulated Dev** | Mock Ingest | Local Docker | Use Mode B (below) |
-
-### Mode B: The Simulation Pipeline (Development)
-
-Use this mode to test the GCN Bridge logic in a completely isolated environment by mocking the **SNEWS 2.0 Ingest** itself.
-
-1.  **Start GCN Mock (Docker)**:
-    ```bash
-    docker compose up -d
-    ```
-2.  **Start the Bridge**:
-    ```bash
-    # Listen to your local mock alerts and bridge to local GCN mock
-    python -m src.cli snews2-gcn-bridge --firedrill
-    ```
-3.  **Simulate an Inbound Detector Alert**:
-    In a separate terminal, use the Simulation Utility:
-    ```bash
-    python -m src.cli snews2-produce --tier coincidence --test
-    ```
-4.  **Verify GCN Notice Arrival**:
-    Use the Verification Utility to view the transformed result in the `snews2-gcn-alerts` topic:
-    ```bash
-    python -m src.cli snews2-consume
-    ```
-
----
-
-## 🔐 Configuration & Credentials
-
-The bridge behavior is controlled via environment variables in your `.env` file. Proper authentication is required for both Axes of operation:
-
-### 1. Ingest Axis (SCiMMA)
-To listen to the live SNEWS 2.0 network, you must authenticate once on your machine:
+### Quick Install (For Users)
+If you only want to run the software and bridge tools, you can install the published package directly from PyPI:
 ```bash
-hop auth add  # Use scimma credentials
+pip install snews-fireworks-launcher
 ```
 
-### 2. Publishing Axis (NASA GCN)
-To publish to the actual NASA GCN, set the following in `.env`:
-*   `USE_GCN_CREDENTIALS=true`
-*   `GCN_CLIENT_ID` / `GCN_CLIENT_SECRET`: Obtained from the NASA GCN portal.
-
-| Variable | Axis | Description | Default |
-| :--- | :--- | :--- | :--- |
-| `KAFKA_BOOTSTRAP_SERVERS` | Output | Destination GCN Kafka brokers. | `localhost:9092` |
-| `USE_GCN_CREDENTIALS` | Output | Toggle between Mock (Docker) and Production (NASA). | `false` |
-| `SNEWS2_TOPIC` | Input | Internal topic used for simulation ingest. | `snews2-alerts` |
-
----
-
-## 🧪 Testing
-
-Ensure your local Kafka is running (`docker compose up -d`), then run:
-
+### Developer Install (For Contributors)
+If you are developing the codebase, or wish to use the local Docker test environment, you should clone the repo:
 ```bash
-pytest tests/ -v
+git clone git@github.com:SNEWS2/SNEWS_fireworks_launcher.git
+cd SNEWS_fireworks_launcher
+pip install -e .[test]
 ```
 
 ---
-> [!IMPORTANT]
-> To switch from **Mock Publishing** to **Actual GCN Publishing**, ensure `USE_GCN_CREDENTIALS=true` and provide your authorized GCN credentials in the `.env` file.
+
+## 💻 Running the Software
+
+The installation exposes the `snews-fireworks-launcher` CLI command globally on your system.
+
+### The Live GCN Bridge
+To start listening to the SCiMMA network and translating to GCN:
+```bash
+# Listen to the firedrill network (testing)
+snews-fireworks-launcher snews2-gcn-bridge --firedrill
+
+# Listen to the real scientific network (production watch)
+snews-fireworks-launcher snews2-gcn-bridge --no-firedrill
+```
+
+### Local Simulation & Verification
+You can also run commands to locally simulate the SNEWS pipeline:
+```bash
+# Produce a mock coincidence alert
+snews-fireworks-launcher snews2-produce --tier coincidence --test
+
+# Consume and view the mock alert
+snews-fireworks-launcher snews2-consume
+```
+
+---
+
+## 🛠 Configuration & Credentials
+
+The bridge behavior is controlled via environment variables. Create a `.env` file in your execution directory based on `.env.example`.
+
+* **SCiMMA Network (Ingest):** To listen to Hopskotch, authenticate your machine by running `hop auth add`.
+* **NASA GCN (Output):** Set `USE_GCN_CREDENTIALS=true` and provide your `GCN_CLIENT_ID` and `GCN_CLIENT_SECRET` in the `.env` to publish to the actual NASA GCN. Otherwise, mocked output bridges to `localhost:9092`.
+
+---
+
+## 🧪 CI & Testing 
+
+The test suite is verified exactly as it runs in the GitHub Actions pipeline by utilizing an isolated Docker environment. This mirrors tests configured across other SNEWS packages like `snews_pt`.
+
+To execute the tests in the container natively:
+```bash
+docker compose run test
+```
+*This command will automatically spin up the mock Kafka environment locally, evaluate the PyTest suite inside an isolated Docker container, and report the exit status.*
+
+---
+
+## 📂 Project Structure
+* `src/snews_fireworks_launcher/`: The core installable python package containing mapping tools, the CLI execution scripts, and the primary bridge runner.
+* `tests/`: End-to-end integration tests routing internal formats to GCN.
+* `docker-compose.yml`: Local mock pipeline components and CI testing services.
+* `Dockerfile.test`: Blueprint for the GitHub Actions verification container.

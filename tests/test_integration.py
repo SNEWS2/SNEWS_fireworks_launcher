@@ -8,8 +8,8 @@ import pytest
 import time
 import uuid
 import os
-from src.utils.snews2_producer import SNEWS2KafkaProducer, CoincidenceTierMessage
-from src.utils.snews2_consumer import SNEWS2KafkaConsumer
+from snews_fireworks_launcher.utils.snews2_producer import SNEWS2KafkaProducer, CoincidenceTierAlert
+from snews_fireworks_launcher.utils.snews2_consumer import SNEWS2KafkaConsumer
 
 @pytest.mark.integration
 class TestSNEWS2KafkaIntegration:
@@ -29,13 +29,18 @@ class TestSNEWS2KafkaIntegration:
         # 1. Produce a message
         detector_name = "TestDetector"
         with SNEWS2KafkaProducer(topic=test_topic) as producer:
-            msg = CoincidenceTierMessage(
-                detector_name=detector_name,
+            now = "2025-01-15T14:30:00.123456+00:00"
+            msg = CoincidenceTierAlert(
+                id=f"SNEWS_Coincidence_ALERT {now}",
+                alert_type="TEST COINC_MSG",
+                server_tag="test-server",
                 detector_names=[detector_name],
-                neutrino_times_utc=["2025-01-15T14:30:00.123456+00:00"],
+                neutrino_times=[now],
+                sent_time=now,
                 p_values=[0.1],
+                p_values_average=0.1,
+                sub_list_number=0,
                 false_alarm_prob=0.01,
-                is_test=True
             )
             producer.send_message(msg)
             producer.flush()
@@ -58,9 +63,8 @@ class TestSNEWS2KafkaIntegration:
         
         # 3. Verify
         assert received_msg is not None, "Failed to consume SNEWS2 message"
-        assert received_msg.detector_name == detector_name
-        assert received_msg.tier == "CoincidenceTier"
-        assert received_msg.is_test is True
+        assert received_msg.detector_names == [detector_name]
+        assert "TEST" in received_msg.alert_type
 
 if __name__ == "__main__":
     # Allow running directly

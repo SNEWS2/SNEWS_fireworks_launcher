@@ -20,6 +20,7 @@ from ..schemas.snews2_messages import (
     HeartbeatMessage,
     RetractionMessage,
     CoincidenceTierMessage,
+    CoincidenceTierAlert,
     SignificanceTierMessage,
     TimingTierMessage,
     Tier,
@@ -97,7 +98,7 @@ class SNEWS2KafkaProducer:
             message.sent_time_utc = datetime.now(timezone.utc).isoformat()
 
         message_key = key or message.detector_name
-        message_value = message.to_json()
+        message_value = message.model_dump(mode="json")
 
         future = self._producer.send(
             self.topic,
@@ -157,16 +158,20 @@ def create_sample_heartbeat(is_test: bool = True) -> HeartbeatMessage:
     )
 
 
-def create_sample_coincidence(is_test: bool = True) -> CoincidenceTierMessage:
+def create_sample_coincidence(is_test: bool = True) -> CoincidenceTierAlert:
     """Create a sample coincidence tier message."""
-    return CoincidenceTierMessage(
-        detector_name="Super-K",
+    now = _now_iso()
+    return CoincidenceTierAlert(
+        id=f"SNEWS_Coincidence_ALERT {now}",
+        alert_type="TEST COINC_MSG",
+        server_tag="test-server",
         detector_names=["Super-K", "IceCube", "KamLAND"],
-        neutrino_times_utc=[_now_iso(), _now_iso(), _now_iso()],
-        machine_time_utc=_now_iso(),
+        neutrino_times=[now, now, now],
+        sent_time=now,
         p_values=[0.01, 0.05, 0.08],
+        p_values_average=0.046,
+        sub_list_number=0,
         false_alarm_prob=0.0001,
-        is_test=is_test,
     )
 
 
