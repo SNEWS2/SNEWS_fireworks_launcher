@@ -76,7 +76,7 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
         "is_pre_sn", "is_test", "is_firedrill", "meta", "schema_version", "detector_name",
         "sent_time", "alert_type", "server_tag"
     }
-    tier_data = msg.model_dump(exclude=excludes, exclude_none=True)
+    tier_data = msg.model_dump(exclude=excludes, exclude_none=True, mode="json")
     
     if isinstance(msg, CoincidenceTierAlert):
         detector_names = msg.detector_names

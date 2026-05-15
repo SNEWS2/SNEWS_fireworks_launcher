@@ -119,24 +119,44 @@ class SNEWS2KafkaConsumer:
     @staticmethod
     def pretty_print(msg: SNEWS2MessageBase) -> None:
         """Tier-aware pretty-print of a SNEWS2 message."""
-        tier = msg.tier if isinstance(msg.tier, str) else msg.tier.value
-        test_label = " [TEST]" if msg.is_test else ""
-        firedrill_label = " [FIREDRILL]" if msg.is_firedrill else ""
-        pre_sn_label = " [PRE-SN]" if msg.is_pre_sn else ""
+        tier = getattr(msg, "tier", None)
+        if tier is not None:
+            tier = tier if isinstance(tier, str) else tier.value
+        else:
+            tier = getattr(msg, "alert_type", "Unknown")
+
+        is_test = getattr(msg, "is_test", False)
+        is_firedrill = getattr(msg, "is_firedrill", False)
+        is_pre_sn = getattr(msg, "is_pre_sn", False)
+
+        test_label = " [TEST]" if is_test else ""
+        firedrill_label = " [FIREDRILL]" if is_firedrill else ""
+        pre_sn_label = " [PRE-SN]" if is_pre_sn else ""
 
         print("\n" + "=" * 60)
         print(f"SNEWS2 {tier}{test_label}{firedrill_label}{pre_sn_label}")
         print("=" * 60)
-        print(f"Detector:      {msg.detector_name}")
-        print(f"UUID:          {msg.uuid[:12]}...")
-        if msg.machine_time_utc:
-            print(f"Machine Time:  {msg.machine_time_utc}")
-        if msg.sent_time_utc:
-            print(f"Sent Time:     {msg.sent_time_utc}")
+        
+        detector_name = getattr(msg, "detector_name", None)
+        if detector_name:
+            print(f"Detector:      {detector_name}")
+        elif hasattr(msg, "detector_names"):
+            print(f"Detectors:     {msg.detector_names}")
+            
+        uuid_str = getattr(msg, "uuid", getattr(msg, "id", "Unknown"))
+        print(f"UUID:          {str(uuid_str)[:12]}...")
+        
+        machine_time = getattr(msg, "machine_time_utc", None)
+        if machine_time:
+            print(f"Machine Time:  {machine_time}")
+            
+        sent_time = getattr(msg, "sent_time_utc", getattr(msg, "sent_time", None))
+        if sent_time:
+            print(f"Sent Time:     {sent_time}")
         print("-" * 60)
 
         # Tier-specific fields
-        if tier == Tier.HEARTBEAT or tier == "Heartbeat":
+        if tier == Tier.HEART_BEAT or tier == "Heartbeat":
             print(f"Status:        {msg.detector_status}")
 
         elif tier == Tier.RETRACTION or tier == "Retraction":

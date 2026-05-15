@@ -94,7 +94,7 @@ class SNEWS2KafkaProducer:
             key: Optional message key (defaults to detector_name).
         """
         # Set sent_time if not already set
-        if message.sent_time_utc is None:
+        if hasattr(message, "sent_time_utc") and getattr(message, "sent_time_utc") is None:
             message.sent_time_utc = datetime.now(timezone.utc).isoformat()
 
         message_key = key or message.detector_name

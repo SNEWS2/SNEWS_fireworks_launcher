@@ -49,10 +49,9 @@ def test_transform_heartbeat_to_gcn():
     
     gcn_notice = transform_snews2_to_gcn(msg)
     
-    assert gcn_notice.snews2_tier == Tier.HEARTBEAT
+    assert gcn_notice.snews2_tier == Tier.HEART_BEAT
     assert gcn_notice.alert.alert_tense == "current"
-    assert gcn_notice.alert.alert_tense == "current"
-    assert gcn_notice.event_times_utc == ["2025-01-15T14:35:00.000000+00:00"]
+    assert gcn_notice.event_times_utc == ["2025-01-15T14:35:00.000000000Z"]
     assert gcn_notice.tier_data["detector_status"] == "ON"
     assert "machine_time_utc" not in gcn_notice.tier_data # excluded base field
 
@@ -64,15 +63,16 @@ def test_transform_timing_tier_to_gcn():
         start_time_utc="2025-01-15T14:30:00.000000+00:00",
         timing_series=[1000, 2000, 3000],
         detection_channel=DetectionChannel.NU_E,
-        is_firedrill=True
+        is_firedrill=True,
+        is_test=True
     )
     
     gcn_notice = transform_snews2_to_gcn(msg)
     
     assert gcn_notice.snews2_tier == Tier.TIMING_TIER
-    assert gcn_notice.alert.alert_tense == "injection"
-    assert gcn_notice.event_times_utc == ["2025-01-15T14:30:00.123456+00:00"]
-    assert gcn_notice.tier_data["start_time_utc"] == "2025-01-15T14:30:00.000000+00:00"
+    assert gcn_notice.alert.alert_tense == "test"
+    assert gcn_notice.event_times_utc == ["2025-01-15T14:30:00.123456000Z"]
+    assert gcn_notice.tier_data["start_time_utc"] == "2025-01-15T14:30:00.000000000Z"
     assert gcn_notice.tier_data["timing_series"] == [1000, 2000, 3000]
     assert gcn_notice.tier_data["detection_channel"] == DetectionChannel.NU_E.value
     
@@ -100,6 +100,6 @@ def test_transform_significance_to_gcn():
     )
     
     gcn_notice = transform_snews2_to_gcn(msg)
-    assert gcn_notice.event_times_utc == ["2025-01-15T14:30:00.000000+00:00"]
+    assert gcn_notice.event_times_utc == ["2025-01-15T14:30:00.000000000Z"]
     assert gcn_notice.tier_data["p_values"] == [0.1, 0.05, 0.01]
     assert gcn_notice.tier_data["t_bin_width_sec"] == 0.5
