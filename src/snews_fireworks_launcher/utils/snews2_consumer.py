@@ -76,28 +76,33 @@ class SNEWS2KafkaConsumer:
         count = 0
 
         try:
-            for record in self._consumer:
-                try:
-                    msg = parse_snews2_message(record.value)
-                    messages.append(msg)
-
-                    logger.info(
-                        f"Received: tier={msg.tier}, "
-                        f"detector={msg.detector_name}, "
-                        f"test={msg.is_test}"
-                    )
-
-                    if self.on_message:
-                        self.on_message(msg)
-
-                    count += 1
-                    if max_messages and count >= max_messages:
-                        break
-
-                except Exception as e:
-                    logger.error(f"Failed to parse message: {e}")
-                    continue
-
+            records = self._consumer.poll(timeout_ms=timeout_ms)
+            for topic_partition, partition_records in records.items():
+                for record in partition_records:
+                    try:
+                        msg = parse_snews2_message(record.value)
+                        messages.append(msg)
+    
+                        tier = getattr(msg, "tier", getattr(msg, "alert_type", "Unknown"))
+                        detector = getattr(msg, "detector_name", getattr(msg, "detector_names", "Unknown"))
+                        is_test = getattr(msg, "is_test", getattr(msg, "server_tag", False))
+                        
+                        logger.info(
+                            f"Received: tier={tier}, "
+                            f"detector={detector}, "
+                            f"test={is_test}"
+                        )
+    
+                        if self.on_message:
+                            self.on_message(msg)
+    
+                        count += 1
+                        if max_messages and count >= max_messages:
+                            return messages
+    
+                    except Exception as e:
+                        logger.error(f"Failed to parse message: {e}")
+                        continue
         except KeyboardInterrupt:
             logger.info("Consumer interrupted by user")
 
