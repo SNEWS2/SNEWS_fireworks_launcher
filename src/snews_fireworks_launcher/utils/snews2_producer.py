@@ -97,7 +97,7 @@ class SNEWS2KafkaProducer:
         if hasattr(message, "sent_time_utc") and getattr(message, "sent_time_utc") is None:
             message.sent_time_utc = datetime.now(timezone.utc).isoformat()
 
-        message_key = key or message.detector_name
+        message_key = key or getattr(message, "detector_name", getattr(message, "server_tag", "COINCIDENCE"))
         message_value = message.model_dump(mode="json")
 
         future = self._producer.send(
