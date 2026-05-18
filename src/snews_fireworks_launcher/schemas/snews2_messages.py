@@ -43,7 +43,14 @@ def parse_snews2_message(data: Dict[str, Any]):
     """
     # Specifically catch the snews_cs aggregated alert output since it lacks a "tier" field natively
     if "alert_type" in data and "id" in data and str(data["id"]).startswith("SNEWS_Coincidence_ALERT"):
-        return CoincidenceTierAlert(**data)
+        # Sanitize legacy space-separated keys from snews_cs
+        key_mapping = {
+            "False Alarm Prob": "false_alarm_prob",
+            "p_values average": "p_values_average",
+            "sub list number": "sub_list_number"
+        }
+        sanitized_data = {key_mapping.get(k, k): v for k, v in data.items()}
+        return CoincidenceTierAlert(**sanitized_data)
 
     tier_str = data.get("tier")
     if tier_str is None:
