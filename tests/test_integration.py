@@ -49,15 +49,15 @@ class TestSNEWS2KafkaIntegration:
         received_msg = None
         
         # Give Kafka a moment to settle
-        time.sleep(1)
+        time.sleep(3)
         
         with SNEWS2KafkaConsumer(
             topic=test_topic, 
             auto_offset_reset="earliest",
             group_id=f"test-group-{uuid.uuid4()}"
         ) as consumer:
-            # Try to consume for up to 5 seconds
-            received_messages = consumer.consume(timeout_ms=5000, max_messages=1)
+            # Try to consume for up to 10 seconds
+            received_messages = consumer.consume(timeout_ms=10000, max_messages=1)
             if received_messages:
                 received_msg = received_messages[0]
         
