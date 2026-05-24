@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snews_fireworks_launcher"
+version = "0.1.0"
+description = "SNEWS 2.0 Kafka Pipeline and GCN Bridge"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "kafka-python>=2.0.2",
+    "pydantic>=2.0",
+    "python-dateutil>=2.8",
+    "python-dotenv",
+    "snews_pt",
+    "gcn-kafka"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21"
+]
+
+[project.scripts]
+snews-fireworks-launcher = "snews_fireworks_launcher.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

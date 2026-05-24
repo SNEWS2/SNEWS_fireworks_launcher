@@ -9,9 +9,6 @@ import logging
 import sys
 import os
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from dotenv import load_dotenv
 
 
@@ -47,7 +44,7 @@ def cmd_snews2_produce(args):
     Args:
         args: Argparse namespace containing 'tier' and 'test' flag.
     """
-    from src.utils.snews2_producer import SNEWS2KafkaProducer, SAMPLE_GENERATORS
+    from snews_fireworks_launcher.utils.snews2_producer import SNEWS2KafkaProducer, SAMPLE_GENERATORS
 
     tier = args.tier
     if tier not in SAMPLE_GENERATORS:
@@ -76,7 +73,7 @@ def cmd_snews2_consume(args):
     Args:
         args: Argparse namespace containing optional 'count' limit.
     """
-    from src.utils.snews2_consumer import SNEWS2KafkaConsumer
+    from snews_fireworks_launcher.utils.snews2_consumer import SNEWS2KafkaConsumer
 
     def on_message(msg):
         SNEWS2KafkaConsumer.pretty_print(msg)
@@ -108,7 +105,7 @@ def cmd_snews2_transform(args):
         args: Argparse namespace containing 'tier' and 'test' flag.
     """
     import json
-    from src.utils.snews2_producer import SAMPLE_GENERATORS
+    from snews_fireworks_launcher.utils.snews2_producer import SAMPLE_GENERATORS
 
     tier = args.tier
     if tier not in SAMPLE_GENERATORS:

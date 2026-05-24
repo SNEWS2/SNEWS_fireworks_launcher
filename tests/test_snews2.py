@@ -9,7 +9,7 @@ import json
 import pytest
 from datetime import datetime, timezone
 
-from src.schemas.snews2_messages import (
+from snews_fireworks_launcher.schemas.snews2_messages import (
     SNEWS2MessageBase,
     HeartbeatMessage,
     RetractionMessage,
@@ -19,7 +19,7 @@ from src.schemas.snews2_messages import (
     Tier,
     parse_snews2_message,
 )
-from src.utils.snews2_producer import (
+from snews_fireworks_launcher.utils.snews2_producer import (
     create_sample_heartbeat,
     create_sample_coincidence,
     create_sample_significance,
