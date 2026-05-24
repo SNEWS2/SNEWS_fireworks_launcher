@@ -6,11 +6,11 @@ Encapsulates the 5 SNEWS2 tiers into a single schema for GCN publication.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from .snews2_messages import SNEWS2MessageBase, Tier
+from .snews2_messages import SNEWS2MessageBase, Tier, CoincidenceTierAlert
 
 
 class GCNAlert(BaseModel):
@@ -54,7 +54,7 @@ class SNEWS2GCNNotice(BaseModel):
     tier_data: Dict[str, Any] = Field(..., description="Tier-specific data payload")
 
 
-def transform_snews2_to_gcn(msg: SNEWS2MessageBase) -> SNEWS2GCNNotice:
+def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert]) -> SNEWS2GCNNotice:
     """
     Transform a SNEWS 2.0 message into a unified GCN-compatible JSON payload.
     
@@ -63,34 +63,51 @@ def transform_snews2_to_gcn(msg: SNEWS2MessageBase) -> SNEWS2GCNNotice:
     tier-specific data in the 'tier_data' dictionary.
     
     Args:
-        msg: A validated SNEWS 2.0 message model.
+        msg: A validated SNEWS 2.0 message model or CoincidenceTierAlert.
         
     Returns:
         A SNEWS2GCNNotice instance ready for GCN publication.
     """
-    # Exclude base fields so tier_data only holds tier-specific properties
-    tier_data = msg.model_dump(exclude={
-        "id", "uuid", "tier", "sent_time_utc", "machine_time_utc", 
-        "is_pre_sn", "is_test", "is_firedrill", "meta", "schema_version", "detector_name"
-    }, exclude_none=True)
-    
-    # Extract detectors and times
-    detector_names = [msg.detector_name]
     from datetime import timezone, datetime
-    event_time = msg.machine_time_utc or msg.sent_time_utc or datetime.now(timezone.utc).isoformat()
-    event_times_utc = [event_time]
     
-    if msg.tier in [Tier.COINCIDENCE_TIER, "CoincidenceTier"]:
-        detector_names = getattr(msg, "detector_names", detector_names)
-        event_times_utc = getattr(msg, "neutrino_times_utc", event_times_utc)
-        tier_data.pop("detector_names", None) # exclude from tier since it's promoted
-        tier_data.pop("neutrino_times_utc", None)
-    elif msg.tier in [Tier.TIMING_TIER, "TimingTier"]:
-        event_times_utc = [getattr(msg, "neutrino_time_utc", event_time)]
+    # Exclude base fields so tier_data only holds tier-specific properties
+    excludes = {
+        "id", "uuid", "tier", "sent_time_utc", "machine_time_utc", 
+        "is_pre_sn", "is_test", "is_firedrill", "meta", "schema_version", "detector_name",
+        "sent_time", "alert_type", "server_tag"
+    }
+    tier_data = msg.model_dump(exclude=excludes, exclude_none=True, mode="json")
+    
+    if isinstance(msg, CoincidenceTierAlert):
+        detector_names = msg.detector_names
+        event_times_utc = msg.neutrino_times
+        event_time = msg.sent_time or datetime.now(timezone.utc).isoformat()
         
-    # Standardize tense and type
-    alert_tense = "test" if msg.is_test else ("injection" if msg.is_firedrill else "current")
-    alert_type_val = "retraction" if msg.tier in [Tier.RETRACTION, "RetractionTier"] else "initial"
+        tier_data.pop("detector_names", None)
+        tier_data.pop("neutrino_times", None)
+        
+        # Test tense parsing based on the server's alert_type formatting
+        alert_tense = "test" if "TEST" in msg.alert_type.upper() else "current"
+        alert_type_val = "initial"
+        msg_tier = Tier.COINCIDENCE_TIER
+        msg_uuid = msg.id.split(" ")[-1] if " " in msg.id else msg.id  # Extract a usable ID
+        
+        far_val = msg.false_alarm_prob if msg.false_alarm_prob != "N/A" else None
+    else:
+        detector_names = [msg.detector_name]
+        event_time = msg.machine_time_utc or msg.sent_time_utc or datetime.now(timezone.utc).isoformat()
+        event_times_utc = [event_time]
+        
+        if msg.tier in [Tier.TIMING_TIER, "TimingTier"]:
+            event_times_utc = [getattr(msg, "neutrino_time_utc", event_time)]
+            
+        # Standardize tense and type
+        alert_tense = "test" if msg.is_test else ("injection" if msg.is_firedrill else "current")
+        alert_type_val = "retraction" if msg.tier in [Tier.RETRACTION, "RetractionTier"] else "initial"
+        msg_tier = msg.tier
+        msg_uuid = msg.uuid
+        
+        far_val = getattr(msg, "false_alarm_prob", None) or getattr(msg, "false_alarm_rate_hz", None)
     
     gcn_alert = GCNAlert(
         alert_datetime=datetime.now(timezone.utc).isoformat(),
@@ -99,7 +116,7 @@ def transform_snews2_to_gcn(msg: SNEWS2MessageBase) -> SNEWS2GCNNotice:
     )
     
     gcn_event = GCNEvent(
-        id=msg.uuid,
+        id=msg_uuid,
         data_archive_page=None
     )
     
@@ -110,9 +127,11 @@ def transform_snews2_to_gcn(msg: SNEWS2MessageBase) -> SNEWS2GCNNotice:
     )
     
     gcn_statistics = None
-    far_val = getattr(msg, "false_alarm_prob", None) or getattr(msg, "false_alarm_rate_hz", None)
     if far_val is not None:
-        gcn_statistics = GCNStatistics(far=float(far_val))
+        try:
+            gcn_statistics = GCNStatistics(far=float(far_val))
+        except ValueError:
+            pass
     
     return SNEWS2GCNNotice(
         alert=gcn_alert,
@@ -120,7 +139,7 @@ def transform_snews2_to_gcn(msg: SNEWS2MessageBase) -> SNEWS2GCNNotice:
         reporter=gcn_reporter,
         datetime=gcn_datetime,
         statistics=gcn_statistics,
-        snews2_tier=msg.tier,
+        snews2_tier=msg_tier,
         detector_names=detector_names,
         event_times_utc=event_times_utc,
         tier_data=tier_data
