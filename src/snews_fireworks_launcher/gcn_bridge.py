@@ -103,14 +103,29 @@ class SNEWS2HopskotchListener:
         try:
             # 1. Parse against SNEWS2 models
             snews2_msg = parse_snews2_message(message_data)
-            logger.info(f"Received SNEWS2 {snews2_msg.tier} from {snews2_msg.detector_name}")
+            
+            # Extract safe attributes for logging and keying since CoincidenceTierAlert lacks base fields
+            from snews_fireworks_launcher.schemas.snews2_messages import CoincidenceTierAlert
+            if isinstance(snews2_msg, CoincidenceTierAlert):
+                msg_tier = "COINCIDENCE_TIER"
+                msg_sender = "Coincidence Server"
+                key = snews2_msg.id.split(" ")[-1] if " " in snews2_msg.id else snews2_msg.id
+            else:
+                msg_tier = snews2_msg.tier
+                msg_sender = snews2_msg.detector_name
+                key = snews2_msg.uuid
+                
+            logger.info(f"Received SNEWS2 {msg_tier} from {msg_sender}")
             
             # 2. Transform to unified GCN schema
             gcn_notice = transform_snews2_to_gcn(snews2_msg)
             
+            if gcn_notice is None:
+                logger.info(f"Skipping {msg_tier} alert - Currently only publishing CoincidenceTier to GCN")
+                return None
+            
             # 3. Publish to Kafka
-            # Key by primary detector to maintain order
-            key = snews2_msg.detector_name
+            # Key by event UUID to maintain order for updates/retractions
             payload = gcn_notice.model_dump(mode="json")
             
             if self.use_gcn_credentials and HAS_GCN_KAFKA:
