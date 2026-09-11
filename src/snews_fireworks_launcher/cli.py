@@ -137,6 +137,9 @@ def cmd_snews2_gcn_bridge(args):
         cmd.append("--no-firedrill")
     else:
         cmd.append("--firedrill")
+    
+    if args.test:
+        cmd.append("--test")
         
     print(f"Starting SNEWS 2.0 to GCN Bridge...")
     print(f"Command: {' '.join(cmd)}")
@@ -200,6 +203,7 @@ Examples:
                                       aliases=["snews2-hopskotch-listen"],
                                       help="Listen to Hopskotch and bridge alerts to GCN (mock or real)")
     s2_bridge.add_argument("--no-firedrill", action="store_true", help="Listen to real hopskotch network instead of firedrill")
+    s2_bridge.add_argument("--test", action="store_true", help="Mark as TEST")
     s2_bridge.set_defaults(func=cmd_snews2_gcn_bridge)
     
     args = parser.parse_args()
