@@ -9,9 +9,6 @@ import logging
 import sys
 import os
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from dotenv import load_dotenv
 
 
@@ -47,7 +44,7 @@ def cmd_snews2_produce(args):
     Args:
         args: Argparse namespace containing 'tier' and 'test' flag.
     """
-    from src.utils.snews2_producer import SNEWS2KafkaProducer, SAMPLE_GENERATORS
+    from snews_fireworks_launcher.utils.snews2_producer import SNEWS2KafkaProducer, SAMPLE_GENERATORS
 
     tier = args.tier
     if tier not in SAMPLE_GENERATORS:
@@ -76,7 +73,7 @@ def cmd_snews2_consume(args):
     Args:
         args: Argparse namespace containing optional 'count' limit.
     """
-    from src.utils.snews2_consumer import SNEWS2KafkaConsumer
+    from snews_fireworks_launcher.utils.snews2_consumer import SNEWS2KafkaConsumer
 
     def on_message(msg):
         SNEWS2KafkaConsumer.pretty_print(msg)
@@ -108,7 +105,7 @@ def cmd_snews2_transform(args):
         args: Argparse namespace containing 'tier' and 'test' flag.
     """
     import json
-    from src.utils.snews2_producer import SAMPLE_GENERATORS
+    from snews_fireworks_launcher.utils.snews2_producer import SAMPLE_GENERATORS
 
     tier = args.tier
     if tier not in SAMPLE_GENERATORS:
@@ -140,6 +137,9 @@ def cmd_snews2_gcn_bridge(args):
         cmd.append("--no-firedrill")
     else:
         cmd.append("--firedrill")
+    
+    if args.test:
+        cmd.append("--test")
         
     print(f"Starting SNEWS 2.0 to GCN Bridge...")
     print(f"Command: {' '.join(cmd)}")
@@ -172,10 +172,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  python -m src.cli snews2-gcn-bridge --firedrill
-  python -m src.cli snews2-produce --tier coincidence --test
-  python -m src.cli snews2-consume --count 5
-  python -m src.cli snews2-transform --tier timing
+  python -m snews-fireworks-launcher snews2-gcn-bridge --firedrill
+  python -m snews-fireworks-launcher snews2-produce --tier coincidence --test
+  python -m snews-fireworks-launcher snews2-consume --count 5
+  python -m snews-fireworks-launcher snews2-transform --tier timing
         """,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
@@ -203,6 +203,7 @@ Examples:
                                       aliases=["snews2-hopskotch-listen"],
                                       help="Listen to Hopskotch and bridge alerts to GCN (mock or real)")
     s2_bridge.add_argument("--no-firedrill", action="store_true", help="Listen to real hopskotch network instead of firedrill")
+    s2_bridge.add_argument("--test", action="store_true", help="Mark as TEST")
     s2_bridge.set_defaults(func=cmd_snews2_gcn_bridge)
     
     args = parser.parse_args()

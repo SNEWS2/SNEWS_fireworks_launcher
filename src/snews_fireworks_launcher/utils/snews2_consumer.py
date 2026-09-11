@@ -76,28 +76,29 @@ class SNEWS2KafkaConsumer:
         count = 0
 
         try:
-            for record in self._consumer:
-                try:
-                    msg = parse_snews2_message(record.value)
-                    messages.append(msg)
+            records = self._consumer.poll(timeout_ms=timeout_ms)
+            for topic_partition, partition_records in records.items():
+                for record in partition_records:
+                    try:
+                        msg = parse_snews2_message(record.value)
+                        messages.append(msg)
 
-                    logger.info(
-                        f"Received: tier={msg.tier}, "
-                        f"detector={msg.detector_name}, "
-                        f"test={msg.is_test}"
-                    )
+                        logger.info(
+                            f"Received: tier={msg.tier}, "
+                            f"detector={msg.detector_name}, "
+                            f"test={msg.is_test}"
+                        )
 
-                    if self.on_message:
-                        self.on_message(msg)
+                        if self.on_message:
+                            self.on_message(msg)
 
-                    count += 1
-                    if max_messages and count >= max_messages:
-                        break
+                        count += 1
+                        if max_messages and count >= max_messages:
+                            return messages
 
-                except Exception as e:
-                    logger.error(f"Failed to parse message: {e}")
-                    continue
-
+                    except Exception as e:
+                        logger.error(f"Failed to parse message: {e}")
+                        continue
         except KeyboardInterrupt:
             logger.info("Consumer interrupted by user")
 

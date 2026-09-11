@@ -21,8 +21,12 @@ except ImportError:
 
 from kafka import KafkaProducer
 
-from .schemas.snews2_messages import parse_snews2_message, SNEWS2MessageBase
-from .schemas.snews2_gcn_schema import transform_snews2_to_gcn, SNEWS2GCNNotice
+# Ensure the project root is in the python path when ran as a script plugin
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from snews_fireworks_launcher.schemas.snews2_messages import parse_snews2_message, SNEWS2MessageBase
+from snews_fireworks_launcher.schemas.snews2_gcn_schema import transform_snews2_to_gcn, SNEWS2GCNNotice
 
 logger = logging.getLogger(__name__)
 

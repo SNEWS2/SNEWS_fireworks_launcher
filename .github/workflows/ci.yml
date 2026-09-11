@@ -1,0 +1,25 @@
+name: CI Validation
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-bridge:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Run Test Environment
+      run: |
+        docker compose run test
+
+
+    - name: Tear down Mock Environment
+      if: always()
+      run: |
+        docker compose down

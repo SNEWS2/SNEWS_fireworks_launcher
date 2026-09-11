@@ -1,8 +1,8 @@
 import pytest
 from datetime import datetime
 
-from src.schemas.snews2_messages import CoincidenceTierMessage, Tier, DetectorStatus, DetectionChannel, HeartbeatMessage, TimingTierMessage, RetractionMessage, SignificanceTierMessage
-from src.schemas.snews2_gcn_schema import transform_snews2_to_gcn, SNEWS2GCNNotice
+from snews_fireworks_launcher.schemas.snews2_messages import CoincidenceTierMessage, Tier, DetectorStatus, DetectionChannel, HeartbeatMessage, TimingTierMessage, RetractionMessage, SignificanceTierMessage
+from snews_fireworks_launcher.schemas.snews2_gcn_schema import transform_snews2_to_gcn, SNEWS2GCNNotice
 
 def test_transform_coincidence_tier_to_gcn():
     """Verify that a CoincidenceTier alert is correctly transformed into GCN format."""
