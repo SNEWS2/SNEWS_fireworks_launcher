@@ -30,3 +30,4 @@ Thumbs.db
 
 # Project Specific
 gcn-schema/
+*.egg-info

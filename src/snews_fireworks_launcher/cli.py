@@ -169,10 +169,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  python -m src.cli snews2-gcn-bridge --firedrill
-  python -m src.cli snews2-produce --tier coincidence --test
-  python -m src.cli snews2-consume --count 5
-  python -m src.cli snews2-transform --tier timing
+  python -m snews-fireworks-launcher snews2-gcn-bridge --firedrill
+  python -m snews-fireworks-launcher snews2-produce --tier coincidence --test
+  python -m snews-fireworks-launcher snews2-consume --count 5
+  python -m snews-fireworks-launcher snews2-transform --tier timing
         """,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
