@@ -2,6 +2,11 @@
 
 A production-ready pipeline for converting **SNEWS 2.0 messages** into standardized NASA GCN formats. This package acts as the central software bridge for real-time supernova neutrino alerts, propagating them from the SCiMMA/Hopskotch network to the global astronomical community via GCN.
 
+## 🌟 Data Schema Interoperability
+
+This package inherits its core data schemas from **[`snews-data-formats`](https://github.com/SNEWS2/snews-data-formats)** to ensure strict, typed validation of messages.
+*Note: As an interim step, we are currently integrating with an unmerged branch/PR of `snews-data-formats`. The Fireworks Launcher gracefully handles these upstream schemas as we push through PR validation.*
+
 ---
 
 ## 🚀 Installation
