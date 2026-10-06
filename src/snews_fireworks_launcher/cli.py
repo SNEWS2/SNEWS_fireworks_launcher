@@ -262,7 +262,12 @@ def cmd_snews2_gcn_bridge(args):
     print("-" * 60)
     
     try:
-        subprocess.run(cmd, check=True)
+        # snews_pt runs the plugin via a bare `python` (os.system), so put this
+        # interpreter's bin dir first on PATH; otherwise both `snews_pt` and the
+        # plugin may resolve to another environment lacking gcn-kafka.
+        env = os.environ.copy()
+        env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
+        subprocess.run(cmd, check=True, env=env)
     except KeyboardInterrupt:
         print("\n\n✓ Listener stopped")
     except Exception as e:
