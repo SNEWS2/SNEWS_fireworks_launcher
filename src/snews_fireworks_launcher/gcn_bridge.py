@@ -41,27 +41,33 @@ class SNEWS2HopskotchListener:
     and republishes them to a local mock GCN (Kafka) or a real NASA GCN 
     endpoint.
     """
-    DEFAULT_GCN_TOPIC = "snews2-gcn-alerts"
-    
+    DEFAULT_GCN_TOPIC = "gcn.notices.snews2.alert"
+    DEFAULT_GCN_DOMAIN = "test.gcn.nasa.gov"
+
     def __init__(
         self,
         gcn_topic: Optional[str] = None,
         bootstrap_servers: Optional[str] = None,
-        use_gcn_credentials: bool = False
+        use_gcn_credentials: bool = False,
+        gcn_domain: Optional[str] = None,
     ):
         """
         Initialize the listener.
-        
+
         Args:
             gcn_topic: Kafka topic to publish to.
-            bootstrap_servers: Kafka bootstrap servers.
+            bootstrap_servers: Kafka bootstrap servers (mock producer only).
             use_gcn_credentials: If True, attempts to use GCN credentials via gcn-kafka.
+            gcn_domain: Which GCN Kafka broker to publish to when using real
+                credentials - 'test.gcn.nasa.gov' (default, for test notices),
+                'gcn.nasa.gov' (production), or 'dev.gcn.nasa.gov'.
         """
         self.gcn_topic = gcn_topic or os.getenv("SNEWS2_GCN_TOPIC", self.DEFAULT_GCN_TOPIC)
         self.bootstrap_servers = bootstrap_servers or os.getenv(
             "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
         )
         self.use_gcn_credentials = use_gcn_credentials or os.getenv("USE_GCN_CREDENTIALS", "false").lower() == "true"
+        self.gcn_domain = gcn_domain or os.getenv("GCN_DOMAIN", self.DEFAULT_GCN_DOMAIN)
         
         if self.use_gcn_credentials:
             if not HAS_GCN_KAFKA:
@@ -82,15 +88,13 @@ class SNEWS2HopskotchListener:
         logger.info(f"Initialized mock GCN KafkaProducer for topic {self.gcn_topic} at {self.bootstrap_servers}")
 
     def setup_gcn_producer(self):
-        """Setup GCN producer for production environment."""
-        # Note: GCNProducer from gcn-kafka uses client_id/client_secret from env/config
+        """Setup GCN producer against the configured GCN Kafka domain."""
         self.producer = GCNProducer(
-            client_id=os.getenv("GCN_CLIENT_ID"),
-            client_secret=os.getenv("GCN_CLIENT_SECRET"),
-            # gcn-kafka Producer handles its own serialization if needed, 
-            # but usually it's better to pass bytes or dict depending on version
+            client_id=os.getenv("GCN_PRODUCER_CLIENT_ID"),
+            client_secret=os.getenv("GCN_PRODUCER_CLIENT_SECRET"),
+            domain=self.gcn_domain,
         )
-        logger.info(f"Initialized real GCN Producer for topic {self.gcn_topic}")
+        logger.info(f"Initialized real GCN Producer for topic {self.gcn_topic} on domain {self.gcn_domain}")
 
     def process_message(self, message_data: Dict[str, Any]) -> Optional[SNEWS2GCNNotice]:
         """
@@ -129,8 +133,31 @@ class SNEWS2HopskotchListener:
             payload = gcn_notice.model_dump(mode="json")
             
             if self.use_gcn_credentials and HAS_GCN_KAFKA:
-                # Real GCN publishing
-                self.producer.produce(self.gcn_topic, json.dumps(payload).encode("utf-8"))
+                # Real GCN publishing. produce() only queues the message locally;
+                # flush() blocks until it is actually delivered (or fails), which
+                # matters for short-lived processes/scripts that exit right after.
+                delivery_result: Dict[str, Any] = {}
+
+                def _on_delivery(err, msg):
+                    if err is not None:
+                        delivery_result["error"] = err
+                    else:
+                        delivery_result["topic"] = msg.topic()
+                        delivery_result["offset"] = msg.offset()
+
+                self.producer.produce(
+                    self.gcn_topic,
+                    json.dumps(payload).encode("utf-8"),
+                    callback=_on_delivery,
+                )
+                self.producer.flush(timeout=10)
+
+                if "error" in delivery_result:
+                    raise RuntimeError(f"GCN delivery failed: {delivery_result['error']}")
+                logger.info(
+                    f"GCN delivery confirmed: topic={delivery_result.get('topic')}, "
+                    f"offset={delivery_result.get('offset')}"
+                )
             else:
                 # Mock GCN publishing
                 future = self.producer.send(self.gcn_topic, key=key, value=payload)

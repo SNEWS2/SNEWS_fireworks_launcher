@@ -34,6 +34,29 @@ def setup_logging(verbose: bool = False):
 SNEWS2_TIERS = ["heartbeat", "coincidence", "significance", "timing", "retraction"]
 
 
+def _sample_summary(msg):
+    """
+    Describe a sample message for CLI output, handling both per-detector tier
+    messages (have .tier/.detector_name/.uuid/.is_test) and the aggregated
+    CoincidenceTierAlert shape (has .id/.detector_names/.alert_type instead).
+    """
+    from snews_fireworks_launcher.schemas.snews2_messages import CoincidenceTierAlert
+
+    if isinstance(msg, CoincidenceTierAlert):
+        return {
+            "tier_display": "CoincidenceTier",
+            "is_test": "TEST" in msg.alert_type.upper(),
+            "detector": ", ".join(msg.detector_names),
+            "uid": msg.id,
+        }
+    return {
+        "tier_display": msg.tier.value if hasattr(msg.tier, "value") else msg.tier,
+        "is_test": msg.is_test,
+        "detector": msg.detector_name,
+        "uid": msg.uuid,
+    }
+
+
 def cmd_snews2_produce(args):
     """
     Handle the 'snews2-produce' command.
@@ -56,11 +79,11 @@ def cmd_snews2_produce(args):
         producer.send_message(msg)
         producer.flush()
 
-        test_label = " [TEST]" if msg.is_test else ""
-        tier_display = msg.tier.value if hasattr(msg.tier, 'value') else msg.tier
-        print(f"✓ Sent SNEWS2 {tier_display}{test_label}")
-        print(f"  Detector:  {msg.detector_name}")
-        print(f"  UUID:      {msg.uuid[:12]}...")
+        summary = _sample_summary(msg)
+        test_label = " [TEST]" if summary["is_test"] else ""
+        print(f"✓ Sent SNEWS2 {summary['tier_display']}{test_label}")
+        print(f"  Detector:  {summary['detector']}")
+        print(f"  UUID:      {summary['uid'][:12]}...")
 
 
 def cmd_snews2_consume(args):
@@ -113,9 +136,102 @@ def cmd_snews2_transform(args):
         sys.exit(1)
 
     msg = SAMPLE_GENERATORS[tier](is_test=args.test)
-    tier_display = msg.tier.value if hasattr(msg.tier, 'value') else msg.tier
-    print(f"SNEWS2 {tier_display} sample message:\n")
+    summary = _sample_summary(msg)
+    print(f"SNEWS2 {summary['tier_display']} sample message:\n")
     print(json.dumps(msg.model_dump(mode="json"), indent=2))
+
+
+def cmd_gcn_produce_test(args):
+    """
+    Handle the 'gcn-produce-test' command.
+
+    Publishes a hand-built SNEWS2 GCN notice directly to the real GCN Kafka
+    broker (test domain by default), bypassing the schema-transform pipeline
+    entirely (snews2_messages.py / transform_snews2_to_gcn / GCN Bridge).
+
+    Args:
+        args: Argparse namespace containing optional 'file' path and 'live' flag.
+    """
+    import json
+    from snews_fireworks_launcher.utils.gcn_producer import GCNKafkaProducer, create_test_gcn_notice
+
+    if args.file:
+        with open(args.file, "r") as f:
+            payload = json.load(f)
+    else:
+        payload = create_test_gcn_notice(is_test=not args.live)
+
+    producer = GCNKafkaProducer()
+    print(f"Publishing to GCN...")
+    print(f"Domain: {producer.domain}")
+    print(f"Topic:  {producer.topic}")
+    print(json.dumps(payload, indent=2))
+    print("-" * 60)
+
+    result = producer.send_notice(payload)
+    print(f"✓ Delivered: topic={result['topic']}, offset={result['offset']}")
+
+
+def cmd_gcn_list_topics(args):
+    """
+    Handle the 'gcn-list-topics' command.
+
+    Lists every topic visible to the configured GCN_CONSUMER credentials on
+    the configured GCN_DOMAIN, to find the exact topic name GCN provisioned
+    (since it may not match the naming convention exactly).
+    """
+    from snews_fireworks_launcher.utils.gcn_consumer import GCNKafkaConsumer
+
+    consumer = GCNKafkaConsumer()
+    print(f"Domain: {consumer.domain}")
+    print("-" * 60)
+    topics = consumer.list_topics()
+    matches = [t for t in topics if "snews" in t.lower()]
+
+    print(f"All topics visible ({len(topics)}):")
+    for t in topics:
+        print(f"  {t}")
+
+    if matches:
+        print(f"\nLikely SNEWS2 topic(s): {matches}")
+    else:
+        print("\nNo topic containing 'snews' found - check with the GCN team.")
+
+    consumer.close()
+
+
+def cmd_gcn_consume(args):
+    """
+    Handle the 'gcn-consume' command.
+
+    Subscribes to SNEWS2 notices directly from the real NASA GCN Kafka broker
+    (test or production, per GCN_DOMAIN) and prints them to the console. Used
+    to verify that the GCN Bridge is actually publishing successfully.
+
+    Args:
+        args: Argparse namespace containing optional 'count' limit.
+    """
+    from snews_fireworks_launcher.utils.gcn_consumer import GCNKafkaConsumer
+
+    def on_message(notice):
+        GCNKafkaConsumer.pretty_print(notice)
+
+    domain = os.getenv("GCN_DOMAIN", GCNKafkaConsumer.DEFAULT_DOMAIN)
+    topic = os.getenv("SNEWS2_GCN_TOPIC", GCNKafkaConsumer.DEFAULT_TOPIC)
+    print(f"Subscribing to GCN notices (Ctrl+C to stop)...")
+    print(f"Domain: {domain}")
+    print(f"Topic:  {topic}")
+    print("-" * 60)
+
+    with GCNKafkaConsumer(on_message=on_message) as consumer:
+        try:
+            if args.count:
+                messages = consumer.consume(max_messages=args.count)
+                print(f"\n✓ Consumed {len(messages)} GCN notices")
+            else:
+                consumer.consume(max_messages=float("inf"))
+        except KeyboardInterrupt:
+            print("\n\n✓ Consumer stopped")
 
 
 def cmd_snews2_gcn_bridge(args):
@@ -192,6 +308,18 @@ Examples:
     s2_consume = subparsers.add_parser("snews2-consume", help="Subscribe to SNEWS2 alerts from Kafka")
     s2_consume.add_argument("--count", type=int, help="Maximum messages to consume")
     s2_consume.set_defaults(func=cmd_snews2_consume)
+
+    gcn_list_topics = subparsers.add_parser("gcn-list-topics", help="List topics visible to your GCN consumer credentials")
+    gcn_list_topics.set_defaults(func=cmd_gcn_list_topics)
+
+    gcn_consume = subparsers.add_parser("gcn-consume", help="Subscribe to SNEWS2 notices from the real GCN Kafka broker")
+    gcn_consume.add_argument("--count", type=int, help="Maximum messages to consume")
+    gcn_consume.set_defaults(func=cmd_gcn_consume)
+
+    gcn_produce_test = subparsers.add_parser("gcn-produce-test", help="Publish a hand-built SNEWS2 notice directly to GCN (bypasses schema pipeline)")
+    gcn_produce_test.add_argument("--file", type=str, help="Path to a JSON file with a pre-built notice payload")
+    gcn_produce_test.add_argument("--live", action="store_true", help="Mark alert_tense as 'current' instead of 'test'")
+    gcn_produce_test.set_defaults(func=cmd_gcn_produce_test)
 
     s2_transform = subparsers.add_parser("snews2-transform", help="Show sample SNEWS2 JSON (no Kafka)")
     s2_transform.add_argument("--tier", type=str, default="coincidence",

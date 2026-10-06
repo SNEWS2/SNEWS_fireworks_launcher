@@ -28,6 +28,7 @@ class GCNReporter(BaseModel):
     """Reporter metadata identifying SNEWS."""
     mission: str = Field(default="SNEWS", description="Name of Mission or Telescope")
     messenger: str = Field(default="Neutrino", description="Messenger of report")
+    record_number: Optional[int] = Field(default=None, description="Incremental number for messages from the instrument during a given trigger")
 
 class GCNDateTime(BaseModel):
     """Primary event timestamp for GCN."""
@@ -36,6 +37,10 @@ class GCNDateTime(BaseModel):
 class GCNStatistics(BaseModel):
     """Statistical verification data for GCN."""
     far: Optional[float] = Field(default=None, description="False alarm rate [Hz]")
+
+class GCNLocalization(BaseModel):
+    """Localization of transient for GCN."""
+    healpix_url: Optional[str] = Field(default=None, description="URL of HEALPix localization probability file")
 
 class SNEWS2GCNNotice(BaseModel):
     """
@@ -46,6 +51,7 @@ class SNEWS2GCNNotice(BaseModel):
     reporter: GCNReporter
     datetime: GCNDateTime
     statistics: Optional[GCNStatistics] = None
+    localization: Optional[GCNLocalization] = None
     
     schema_version: str = Field(default="1.0", description="Schema version")
     snews2_tier: Tier = Field(..., description="The tier of the original message")
@@ -74,7 +80,7 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
     excludes = {
         "id", "uuid", "tier", "sent_time_utc", "machine_time_utc", 
         "is_pre_sn", "is_test", "is_firedrill", "meta", "schema_version", "detector_name",
-        "sent_time", "alert_type", "server_tag"
+        "sent_time", "alert_type", "server_tag", "healpix_url"
     }
     tier_data = msg.model_dump(exclude=excludes, exclude_none=True, mode="json")
     
@@ -88,7 +94,12 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
         
         # Test tense parsing based on the server's alert_type formatting
         alert_tense = "test" if "TEST" in msg.alert_type.upper() else "current"
-        alert_type_val = "initial"
+        
+        # Determine alert_type and record_number based on sub_list_number
+        sub_list_num = getattr(msg, "sub_list_number", 0)
+        alert_type_val = "update" if sub_list_num > 0 else "initial"
+        record_num = sub_list_num + 1
+        
         msg_tier = Tier.COINCIDENCE_TIER
         msg_uuid = msg.id.split(" ")[-1] if " " in msg.id else msg.id  # Extract a usable ID
         
@@ -104,6 +115,7 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
         # Standardize tense and type
         alert_tense = "test" if msg.is_test else ("injection" if msg.is_firedrill else "current")
         alert_type_val = "retraction" if msg.tier in [Tier.RETRACTION, "RetractionTier"] else "initial"
+        record_num = None
         msg_tier = msg.tier
         msg_uuid = msg.uuid
         
@@ -120,7 +132,9 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
         data_archive_page=None
     )
     
-    gcn_reporter = GCNReporter()
+    gcn_reporter = GCNReporter(
+        record_number=record_num
+    )
     
     gcn_datetime = GCNDateTime(
         trigger_time=event_times_utc[0] if event_times_utc else event_time
@@ -132,6 +146,14 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
             gcn_statistics = GCNStatistics(far=float(far_val))
         except ValueError:
             pass
+            
+    # Extract healpix_url if present on the message
+    gcn_localization = None
+    h_url = getattr(msg, "healpix_url", None)
+    if h_url is None and isinstance(msg, CoincidenceTierAlert) and hasattr(msg, "model_extra") and msg.model_extra:
+        h_url = msg.model_extra.get("healpix_url")
+    if h_url is not None:
+        gcn_localization = GCNLocalization(healpix_url=h_url)
     
     return SNEWS2GCNNotice(
         alert=gcn_alert,
@@ -139,6 +161,7 @@ def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert])
         reporter=gcn_reporter,
         datetime=gcn_datetime,
         statistics=gcn_statistics,
+        localization=gcn_localization,
         snews2_tier=msg_tier,
         detector_names=detector_names,
         event_times_utc=event_times_utc,
