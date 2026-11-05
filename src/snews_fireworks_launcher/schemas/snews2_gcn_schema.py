@@ -1,169 +1,168 @@
 """
 SNEWS 2.0 to GCN JSON Schema transformation.
 
-Encapsulates the 5 SNEWS2 tiers into a single schema for GCN publication.
+Produces notices conforming to GCN's SNEWS2 coincidence schema:
+https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json
+(source: nasa-gcn/gcn-schema, gcn/notices/snews2/coincidence.schema.json).
+
+GCN notices are flat: the core GCN fields (Alert, Event, Reporter, DateTime,
+Statistics, Localization) sit at the top level alongside the SNEWS2-specific
+fields. Use ``SNEWS2GCNNotice.to_gcn_dict()`` to get the exact JSON payload
+to publish; it emits ``$schema`` and omits unset optional fields (GCN's
+schema types them as non-nullable, so ``null`` would fail validation).
 """
 
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .snews2_messages import SNEWS2MessageBase, Tier, CoincidenceTierAlert
 
+GCN_SNEWS2_SCHEMA_ID = (
+    "https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json"
+)
+SNEWS_SCHEMA_VERSION = "1.0"
 
-class GCNAlert(BaseModel):
-    """General alert metadata for GCN."""
-    alert_datetime: str = Field(..., description="Date and time of notice creation [UTC, ISO 8601]")
-    alert_tense: str = Field(..., description="Current, test, or injection")
-    alert_type: str = Field(..., description="Initial, update, or retraction")
+# core/DetectorStatus.schema.json
+DetectorStatus = Literal["on", "off", "triggered"]
 
-class GCNEvent(BaseModel):
-    """Event-specific Identification for GCN."""
-    id: str = Field(..., description="Instrument-specific trigger ID")
-    data_archive_page: Optional[str] = Field(default=None, description="URL of archived data files")
 
-class GCNReporter(BaseModel):
-    """Reporter metadata identifying SNEWS."""
-    mission: str = Field(default="SNEWS", description="Name of Mission or Telescope")
-    messenger: str = Field(default="Neutrino", description="Messenger of report")
-    record_number: Optional[int] = Field(default=None, description="Incremental number for messages from the instrument during a given trigger")
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
-class GCNDateTime(BaseModel):
-    """Primary event timestamp for GCN."""
-    trigger_time: str = Field(..., description="Time of the trigger [ISO 8601]")
-
-class GCNStatistics(BaseModel):
-    """Statistical verification data for GCN."""
-    far: Optional[float] = Field(default=None, description="False alarm rate [Hz]")
-
-class GCNLocalization(BaseModel):
-    """Localization of transient for GCN."""
-    healpix_url: Optional[str] = Field(default=None, description="URL of HEALPix localization probability file")
 
 class SNEWS2GCNNotice(BaseModel):
-    """
-    Unified JSON schema representing a SNEWS 2.0 alert wrapped for GCN.
-    """
-    alert: GCNAlert
-    event: GCNEvent
-    reporter: GCNReporter
-    datetime: GCNDateTime
-    statistics: Optional[GCNStatistics] = None
-    localization: Optional[GCNLocalization] = None
-    
-    schema_version: str = Field(default="1.0", description="Schema version")
+    """A SNEWS 2.0 alert in GCN's flat snews2/coincidence notice format."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_id: str = Field(default=GCN_SNEWS2_SCHEMA_ID, alias="$schema")
+
+    # core/Alert
+    alert_datetime: str = Field(..., description="Date and time of notice creation [UTC, ISO 8601]")
+    alert_tense: Literal["current", "archival", "planned", "injection", "commanded", "test"]
+    alert_type: Literal["initial", "subsequent", "update", "retraction"]
+
+    # core/Event
+    id: str = Field(..., description="SNEWS alert ID")
+    data_archive_page: Optional[str] = None
+
+    # core/Reporter
+    mission: str = "SNEWS"
+    messenger: Literal["EM", "GW", "Neutrino"] = "Neutrino"
+    record_number: Optional[int] = Field(
+        default=None,
+        description="Incremental number for messages from the instrument during a given trigger",
+    )
+
+    # core/DateTime
+    trigger_time: str = Field(..., description="Time of the trigger [ISO 8601]")
+
+    # core/Statistics
+    far: Optional[float] = Field(default=None, description="False alarm rate")
+
+    # core/Localization
+    healpix_url: Optional[str] = None
+
+    # snews2/coincidence
+    snews_schema_version: str = SNEWS_SCHEMA_VERSION
     snews2_tier: Tier = Field(..., description="The tier of the original message")
-    detector_names: List[str] = Field(..., description="Originating detector(s)")
+    detector_status: Dict[str, DetectorStatus] = Field(
+        ..., description="Status of each SNEWS2 detector at the time of the alert"
+    )
     event_times_utc: List[str] = Field(..., description="Primary timestamp(s) for the event")
     tier_data: Dict[str, Any] = Field(..., description="Tier-specific data payload")
+
+    def to_gcn_dict(self) -> Dict[str, Any]:
+        """The JSON payload to publish to GCN."""
+        return self.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def _as_float(value: Any) -> Optional[float]:
+    """False-alarm values from snews_cs can be "N/A"; treat non-numbers as absent."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def transform_snews2_to_gcn(msg: Union[SNEWS2MessageBase, CoincidenceTierAlert]) -> SNEWS2GCNNotice:
     """
-    Transform a SNEWS 2.0 message into a unified GCN-compatible JSON payload.
-    
-    This function handles the extraction of common fields (detectors, times, FAR)
-    and promotes them to the top-level GCN envelope, while preserving
-    tier-specific data in the 'tier_data' dictionary.
-    
-    Args:
-        msg: A validated SNEWS 2.0 message model or CoincidenceTierAlert.
-        
-    Returns:
-        A SNEWS2GCNNotice instance ready for GCN publication.
+    Transform a SNEWS 2.0 message into a GCN snews2/coincidence notice.
+
+    Common fields (detectors, times, FAR) are promoted to the top level;
+    tier-specific properties are kept in ``tier_data``.
     """
-    from datetime import timezone, datetime
-    
     # Exclude base fields so tier_data only holds tier-specific properties
     excludes = {
-        "id", "uuid", "tier", "sent_time_utc", "machine_time_utc", 
+        "id", "uuid", "tier", "sent_time_utc", "machine_time_utc",
         "is_pre_sn", "is_test", "is_firedrill", "meta", "schema_version", "detector_name",
-        "sent_time", "alert_type", "server_tag", "healpix_url"
+        "sent_time", "alert_type", "server_tag", "healpix_url",
     }
     tier_data = msg.model_dump(exclude=excludes, exclude_none=True, mode="json")
-    
+
     if isinstance(msg, CoincidenceTierAlert):
-        detector_names = msg.detector_names
-        event_times_utc = msg.neutrino_times
-        event_time = msg.sent_time or datetime.now(timezone.utc).isoformat()
-        
+        event_times_utc = list(msg.neutrino_times)
+        trigger_time = event_times_utc[0] if event_times_utc else (msg.sent_time or _utc_now_iso())
+
+        # Every detector in a coincidence alert contributed a trigger.
+        detector_status = {name: "triggered" for name in msg.detector_names}
+
         tier_data.pop("detector_names", None)
         tier_data.pop("neutrino_times", None)
-        
-        # Test tense parsing based on the server's alert_type formatting
+        if event_times_utc:
+            tier_data["neutrino_time_utc"] = trigger_time
+
+        # snews_cs marks test alerts in its alert_type string, e.g. "TEST COINC_MSG"
         alert_tense = "test" if "TEST" in msg.alert_type.upper() else "current"
-        
-        # Determine alert_type and record_number based on sub_list_number
-        sub_list_num = getattr(msg, "sub_list_number", 0)
-        alert_type_val = "update" if sub_list_num > 0 else "initial"
-        record_num = sub_list_num + 1
-        
+
+        # sub_list_number 0 is the first alert for this coincidence; >0 are updates
+        sub_list_num = msg.sub_list_number or 0
+        alert_type = "update" if sub_list_num > 0 else "initial"
+        record_number = sub_list_num + 1
+
         msg_tier = Tier.COINCIDENCE_TIER
-        msg_uuid = msg.id.split(" ")[-1] if " " in msg.id else msg.id  # Extract a usable ID
-        
-        far_val = msg.false_alarm_prob if msg.false_alarm_prob != "N/A" else None
+        event_id = msg.id
+        far = _as_float(msg.false_alarm_prob)
     else:
-        detector_names = [msg.detector_name]
-        event_time = msg.machine_time_utc or msg.sent_time_utc or datetime.now(timezone.utc).isoformat()
-        event_times_utc = [event_time]
-        
-        if msg.tier in [Tier.TIMING_TIER, "TimingTier"]:
-            event_times_utc = [getattr(msg, "neutrino_time_utc", event_time)]
-            
-        # Standardize tense and type
+        fallback_time = msg.machine_time_utc or msg.sent_time_utc or _utc_now_iso()
+        trigger_time = getattr(msg, "neutrino_time_utc", None) or fallback_time
+        event_times_utc = [trigger_time]
+
+        heartbeat_status = getattr(msg, "detector_status", None)
+        if msg.tier in (Tier.HEART_BEAT, "Heartbeat") and heartbeat_status:
+            status = "on" if str(heartbeat_status).upper() == "ON" else "off"
+        else:
+            status = "triggered"
+        detector_status = {msg.detector_name: status}
+
         alert_tense = "test" if msg.is_test else ("injection" if msg.is_firedrill else "current")
-        alert_type_val = "retraction" if msg.tier in [Tier.RETRACTION, "RetractionTier"] else "initial"
-        record_num = None
+        alert_type = "retraction" if msg.tier in (Tier.RETRACTION, "Retraction") else "initial"
+        record_number = None
         msg_tier = msg.tier
-        msg_uuid = msg.uuid
-        
-        far_val = getattr(msg, "false_alarm_prob", None) or getattr(msg, "false_alarm_rate_hz", None)
-    
-    gcn_alert = GCNAlert(
-        alert_datetime=datetime.now(timezone.utc).isoformat(),
-        alert_tense=alert_tense,
-        alert_type=alert_type_val
-    )
-    
-    gcn_event = GCNEvent(
-        id=msg_uuid,
-        data_archive_page=None
-    )
-    
-    gcn_reporter = GCNReporter(
-        record_number=record_num
-    )
-    
-    gcn_datetime = GCNDateTime(
-        trigger_time=event_times_utc[0] if event_times_utc else event_time
-    )
-    
-    gcn_statistics = None
-    if far_val is not None:
-        try:
-            gcn_statistics = GCNStatistics(far=float(far_val))
-        except ValueError:
-            pass
-            
-    # Extract healpix_url if present on the message
-    gcn_localization = None
-    h_url = getattr(msg, "healpix_url", None)
-    if h_url is None and isinstance(msg, CoincidenceTierAlert) and hasattr(msg, "model_extra") and msg.model_extra:
-        h_url = msg.model_extra.get("healpix_url")
-    if h_url is not None:
-        gcn_localization = GCNLocalization(healpix_url=h_url)
-    
+        event_id = msg.uuid
+        far = _as_float(getattr(msg, "false_alarm_prob", None) or getattr(msg, "false_alarm_rate_hz", None))
+
+    # tier_data.false_alarm_prob must be a number in the GCN schema
+    if "false_alarm_prob" in tier_data and _as_float(tier_data["false_alarm_prob"]) is None:
+        tier_data.pop("false_alarm_prob")
+
+    healpix_url = getattr(msg, "healpix_url", None)
+    if healpix_url is None and getattr(msg, "model_extra", None):
+        healpix_url = msg.model_extra.get("healpix_url")
+
     return SNEWS2GCNNotice(
-        alert=gcn_alert,
-        event=gcn_event,
-        reporter=gcn_reporter,
-        datetime=gcn_datetime,
-        statistics=gcn_statistics,
-        localization=gcn_localization,
+        alert_datetime=_utc_now_iso(),
+        alert_tense=alert_tense,
+        alert_type=alert_type,
+        id=event_id,
+        record_number=record_number,
+        trigger_time=trigger_time,
+        far=far,
+        healpix_url=healpix_url,
         snews2_tier=msg_tier,
-        detector_names=detector_names,
+        detector_status=detector_status,
         event_times_utc=event_times_utc,
-        tier_data=tier_data
+        tier_data=tier_data,
     )

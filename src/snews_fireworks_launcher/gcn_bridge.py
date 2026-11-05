@@ -130,7 +130,7 @@ class SNEWS2HopskotchListener:
             
             # 3. Publish to Kafka
             # Key by event UUID to maintain order for updates/retractions
-            payload = gcn_notice.model_dump(mode="json")
+            payload = gcn_notice.to_gcn_dict()
             
             if self.use_gcn_credentials and HAS_GCN_KAFKA:
                 # Real GCN publishing. produce() only queues the message locally;

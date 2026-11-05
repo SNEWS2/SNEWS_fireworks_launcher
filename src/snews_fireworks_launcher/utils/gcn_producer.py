@@ -6,7 +6,7 @@ the real NASA GCN Kafka broker (test or production).
 
 This intentionally does NOT go through
 snews_fireworks_launcher.schemas.snews2_messages / snews2_gcn_schema or the
-GCN Bridge - it builds a plain dict matching the SNEWS2GCNNotice JSON shape
+GCN Bridge - it builds a plain dict in GCN's snews2/coincidence notice format
 by hand, so it keeps working even while the upstream snews-data-formats
 schema mismatch (CoincidenceTierAlert) is unresolved.
 """
@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+GCN_SNEWS2_SCHEMA_ID = (
+    "https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json"
+)
 
 
 def create_test_gcn_notice(
@@ -33,45 +38,38 @@ def create_test_gcn_notice(
     far: Optional[float] = 1e-6,
 ) -> Dict[str, Any]:
     """
-    Build a SNEWS2GCNNotice-shaped dict for a CoincidenceTier test alert.
+    Build a CoincidenceTier test notice in GCN's snews2/coincidence format.
 
-    Mirrors the shape produced by
-    snews_fireworks_launcher.schemas.snews2_gcn_schema.SNEWS2GCNNotice /
-    transform_snews2_to_gcn, without importing that module.
+    Same flat shape that
+    snews_fireworks_launcher.schemas.snews2_gcn_schema.SNEWS2GCNNotice.to_gcn_dict()
+    produces, built without importing that module.
     """
     now = _now_iso()
     detector_names = detector_names or ["Super-K", "IceCube"]
-    event_id = str(uuid4())
 
-    return {
-        "alert": {
-            "alert_datetime": now,
-            "alert_tense": "test" if is_test else "current",
-            "alert_type": "initial",
-        },
-        "event": {
-            "id": event_id,
-            "data_archive_page": None,
-        },
-        "reporter": {
-            "mission": "SNEWS",
-            "messenger": "Neutrino",
-            "record_number": 1,
-        },
-        "datetime": {
-            "trigger_time": now,
-        },
-        "statistics": {"far": far} if far is not None else None,
-        "localization": None,
-        "schema_version": "1.0",
+    notice = {
+        "$schema": GCN_SNEWS2_SCHEMA_ID,
+        "alert_datetime": now,
+        "alert_tense": "test" if is_test else "current",
+        "alert_type": "initial",
+        "id": f"SNEWS_Coincidence_ALERT {uuid4()}",
+        "mission": "SNEWS",
+        "messenger": "Neutrino",
+        "record_number": 1,
+        "trigger_time": now,
+        "snews_schema_version": "1.0",
         "snews2_tier": "CoincidenceTier",
-        "detector_names": detector_names,
+        "detector_status": {name: "triggered" for name in detector_names},
         "event_times_utc": [now for _ in detector_names],
         "tier_data": {
+            "neutrino_time_utc": now,
             "p_values": [0.05 for _ in detector_names],
-            "false_alarm_prob": 0.0,
+            "false_alarm_prob": far if far is not None else 0.0,
         },
     }
+    if far is not None:
+        notice["far"] = far
+    return notice
 
 
 class GCNKafkaProducer:

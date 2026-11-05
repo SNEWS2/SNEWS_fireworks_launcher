@@ -5,6 +5,7 @@ Commands for producing and consuming both legacy SNEWS and SNEWS2 notices.
 """
 
 import argparse
+import json
 import logging
 import sys
 import os
@@ -214,7 +215,10 @@ def cmd_gcn_consume(args):
     from snews_fireworks_launcher.utils.gcn_consumer import GCNKafkaConsumer
 
     def on_message(notice):
-        GCNKafkaConsumer.pretty_print(notice)
+        if args.raw:
+            print(json.dumps(notice, indent=2))
+        else:
+            GCNKafkaConsumer.pretty_print(notice)
 
     domain = os.getenv("GCN_DOMAIN", GCNKafkaConsumer.DEFAULT_DOMAIN)
     topic = os.getenv("SNEWS2_GCN_TOPIC", GCNKafkaConsumer.DEFAULT_TOPIC)
@@ -319,6 +323,7 @@ Examples:
 
     gcn_consume = subparsers.add_parser("gcn-consume", help="Subscribe to SNEWS2 notices from the real GCN Kafka broker")
     gcn_consume.add_argument("--count", type=int, help="Maximum messages to consume")
+    gcn_consume.add_argument("--raw", action="store_true", help="Print each notice's full JSON body instead of a summary")
     gcn_consume.set_defaults(func=cmd_gcn_consume)
 
     gcn_produce_test = subparsers.add_parser("gcn-produce-test", help="Publish a hand-built SNEWS2 notice directly to GCN (bypasses schema pipeline)")

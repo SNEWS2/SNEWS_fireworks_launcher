@@ -105,22 +105,19 @@ class GCNKafkaConsumer:
 
     @staticmethod
     def pretty_print(notice: dict) -> None:
-        """Print a SNEWS2GCNNotice JSON payload in a readable form."""
-        alert = notice.get("alert", {})
-        event = notice.get("event", {})
-        reporter = notice.get("reporter", {})
-        dt = notice.get("datetime", {})
-
+        """Print a summary of a GCN snews2/coincidence notice."""
         print("\n" + "=" * 60)
-        print(f"GCN Notice [{alert.get('alert_tense', '?').upper()}] {alert.get('alert_type', '?')}")
+        print(f"GCN Notice [{str(notice.get('alert_tense', '?')).upper()}] {notice.get('alert_type', '?')}")
         print("=" * 60)
-        print(f"Event ID:      {event.get('id')}")
-        print(f"Mission:       {reporter.get('mission')}")
-        print(f"Trigger Time:  {dt.get('trigger_time')}")
-        print(f"Detectors:     {notice.get('detector_names')}")
+        print(f"Schema:        {notice.get('$schema', '(missing $schema)')}")
+        print(f"Event ID:      {notice.get('id')}")
+        print(f"Mission:       {notice.get('mission')}")
+        print(f"Record #:      {notice.get('record_number')}")
+        print(f"Trigger Time:  {notice.get('trigger_time')}")
+        print(f"Detectors:     {notice.get('detector_status')}")
         print(f"SNEWS2 Tier:   {notice.get('snews2_tier')}")
-        if notice.get("statistics"):
-            print(f"FAR:           {notice['statistics'].get('far')}")
+        if notice.get("far") is not None:
+            print(f"FAR:           {notice['far']}")
         print("=" * 60 + "\n")
 
     def list_topics(self, timeout: float = 10.0) -> list:

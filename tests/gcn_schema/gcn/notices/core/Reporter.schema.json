@@ -1,0 +1,38 @@
+{
+  "$id": "https://gcn.nasa.gov/schema/main/gcn/notices/core/Reporter.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reporter",
+  "description": "Alert Reporter instrument",
+  "type": "object",
+  "properties": {
+    "mission": {
+      "type": "string",
+      "description": "Name of Mission or Telescope reporting the event"
+    },
+    "instrument": {
+      "type": "string",
+      "description": "Name of the Instrument reporting the event"
+    },
+    "record_number": {
+      "type": "number",
+      "description": "Incremental number for messages from the instrument during a given trigger (ex: 1, 2, 3)"
+    },
+    "messenger": {
+      "enum": ["EM", "GW", "Neutrino"],
+      "description": "Messenger of report; EM, GW or Neutrino"
+    },
+    "spectral_band": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Observed spectral band, expressed in the specified 'units' field",
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "spectral_band_units": {
+      "type": "string",
+      "enum": ["keV", "nm", "MHz"],
+      "description": "Units for the spectral data; default unit is keV",
+      "default": "keV"
+    }
+  }
+}
