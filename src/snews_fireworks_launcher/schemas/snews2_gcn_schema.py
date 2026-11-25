@@ -2,7 +2,7 @@
 SNEWS 2.0 to GCN JSON Schema transformation.
 
 Produces notices conforming to GCN's SNEWS2 coincidence schema:
-https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json
+https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/snews2/coincidence.schema.json
 (source: nasa-gcn/gcn-schema, gcn/notices/snews2/coincidence.schema.json).
 
 GCN notices are flat: the core GCN fields (Alert, Event, Reporter, DateTime,
@@ -19,8 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .snews2_messages import SNEWS2MessageBase, Tier, CoincidenceTierAlert
 
+# Pinned to a released schema version, as the GCN team asked (not "main").
+# Single source of truth: gcn_producer.py imports this.
 GCN_SNEWS2_SCHEMA_ID = (
-    "https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json"
+    "https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/snews2/coincidence.schema.json"
 )
 SNEWS_SCHEMA_VERSION = "1.0"
 

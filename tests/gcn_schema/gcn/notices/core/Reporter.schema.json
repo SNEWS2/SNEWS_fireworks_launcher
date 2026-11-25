@@ -1,5 +1,5 @@
 {
-  "$id": "https://gcn.nasa.gov/schema/main/gcn/notices/core/Reporter.schema.json",
+  "$id": "https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/core/Reporter.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Reporter",
   "description": "Alert Reporter instrument",
@@ -12,6 +12,10 @@
     "instrument": {
       "type": "string",
       "description": "Name of the Instrument reporting the event"
+    },
+    "service": {
+      "type": "string",
+      "description": "A service, support facility, or archive that provides the data or information on behalf of a mission or observatory."
     },
     "record_number": {
       "type": "number",

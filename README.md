@@ -128,7 +128,7 @@ This sends two `is_test=true` observations (Super-K and IceCube, same neutrino t
 ### What you should see
 * **Terminal 2**, within a few seconds: an `ALERT MESSAGE` block with `alert_type: TEST ...` from a `server_tag` like `coincidence-server-dev-...`. The bridge logs nothing on a successful send; it prints only on failure (`Failed to process hopskotch plugin message: ...`).
 * **Terminal 1:** a `GCN Notice [TEST] ...` block with `SNEWS2 Tier: CoincidenceTier` and the detector names.
-  Run `gcn-consume --raw` to print the full JSON body instead. It should match GCN's [`snews2/coincidence.schema.json`](https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json): flat core fields, a `$schema` field, `snews_schema_version` and `detector_status`.
+  Run `gcn-consume --raw` to print the full JSON body instead. It should match GCN's [`snews2/coincidence.schema.json`](https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/snews2/coincidence.schema.json): flat core fields, a `$schema` field, `snews_schema_version` and `detector_status`.
 
 The dev coincidence server keeps observations in its cache. Your alert may therefore arrive as an `UPDATE` that also lists detectors from other people's tests.
 

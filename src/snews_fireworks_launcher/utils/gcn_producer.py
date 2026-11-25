@@ -20,16 +20,13 @@ from uuid import uuid4
 
 from gcn_kafka import Producer as GCNProducer
 
+from snews_fireworks_launcher.schemas.snews2_gcn_schema import GCN_SNEWS2_SCHEMA_ID
+
 logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-GCN_SNEWS2_SCHEMA_ID = (
-    "https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/snews2/coincidence.schema.json" #instead of main use v7.3.0
-)
 
 
 def create_test_gcn_notice(
