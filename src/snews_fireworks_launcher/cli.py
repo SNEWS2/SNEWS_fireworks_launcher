@@ -292,7 +292,12 @@ def main():
     appropriate command handler.
     """
     load_dotenv()
-    
+
+    # Long-running commands (gcn-consume, the bridge) print notices as they
+    # arrive; when stdout isn't a terminal (IDE consoles, pipes, CI logs) Python
+    # block-buffers it, so nothing appears until several KB pile up.
+    sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser(
         description="SNEWS Kafka Pipeline CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
