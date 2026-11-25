@@ -276,6 +276,7 @@ def cmd_snews2_gcn_bridge(args):
         print("\n\n✓ Listener stopped")
     except Exception as e:
         print(f"\nError running hopskotch listener: {e}")
+        sys.exit(1)
 
 
 

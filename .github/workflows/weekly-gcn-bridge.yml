@@ -136,6 +136,7 @@ jobs:
 
           if [ "$TRIGGER_TEST" = "true" ] && [ "$MODE" = "test" ]; then
             python scripts/trigger_test_coincidence.py
+            touch .test_triggered
           fi
 
           # Listen, streaming the bridge log into the job output as we go.
@@ -164,7 +165,7 @@ jobs:
           if [ "$failed" -gt 0 ]; then
             echo "::error::$failed alert(s) failed to reach GCN; see bridge.log"; exit 1
           fi
-          if [ "$TRIGGER_TEST" = "true" ] && [ "$MODE" = "test" ] && [ "$delivered" -eq 0 ]; then
+          if [ -f .test_triggered ] && [ "$delivered" -eq 0 ]; then
             echo "::error::Test coincidence was sent but no notice reached GCN (is the SNEWS dev coincidence server running?)"
             exit 1
           fi
