@@ -184,7 +184,15 @@ def run_hopskotch_plugin():
         sys.exit(1)
         
     json_path = sys.argv[1]
-    
+
+    # snews_pt runs this as a bare subprocess, so nothing has configured logging;
+    # without this, INFO lines such as "GCN delivery confirmed" are dropped, which
+    # leaves no record of a successful send (the scheduled workflow greps for it).
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     try:
         with open(json_path, "r") as f:
             message_data = json.load(f)

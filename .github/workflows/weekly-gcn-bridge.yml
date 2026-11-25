@@ -1,0 +1,175 @@
+name: Weekly SNEWS -> GCN Bridge
+
+# Every Tuesday: subscribe to a SNEWS 2.0 alert topic on Hopskotch, forward each
+# alert through the bridge (snews2-gcn-bridge) to GCN, then shut down after a
+# fixed listening window. By default it also fires a synthetic is_test=true
+# coincidence so every run proves the whole chain works end to end.
+#
+# Required repository secrets:
+#   HOP_USERNAME, HOP_PASSWORD                       SCiMMA/Hopskotch credentials
+#   GCN_PRODUCER_CLIENT_ID, GCN_PRODUCER_CLIENT_SECRET  GCN producer credentials
+# Optional repository variables (Settings > Secrets and variables > Variables):
+#   GCN_DOMAIN         default test.gcn.nasa.gov
+#   SNEWS2_GCN_TOPIC   default gcn.notices.snews2.alert
+
+on:
+  schedule:
+    - cron: "0 15 * * 2"   # Tuesdays 15:00 UTC (GitHub may start it a few minutes late)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which SNEWS alert topic to listen to"
+        type: choice
+        options:
+          - test        # snews.connection-testing (is_test=true alerts)
+          - firedrill   # snews.alert-firedrill
+          - real        # snews.alert-test (snews_pt's default real-alert topic)
+        default: test
+      listen_minutes:
+        description: "How long to keep the bridge listening"
+        type: number
+        default: 30
+      trigger_test:
+        description: "Send a synthetic test coincidence and require it to reach GCN (test mode only)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: weekly-gcn-bridge
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340   # hard cap under GitHub's 6h job limit
+
+    env:
+      # Scheduled runs have no inputs, so fall back to the defaults here.
+      MODE: ${{ inputs.mode || 'test' }}
+      LISTEN_MINUTES: ${{ inputs.listen_minutes || 30 }}
+      TRIGGER_TEST: ${{ github.event_name == 'schedule' || inputs.trigger_test }}
+      PYTHONUNBUFFERED: "1"
+      USE_GCN_CREDENTIALS: "true"
+      GCN_DOMAIN: ${{ vars.GCN_DOMAIN || 'test.gcn.nasa.gov' }}
+      SNEWS2_GCN_TOPIC: ${{ vars.SNEWS2_GCN_TOPIC || 'gcn.notices.snews2.alert' }}
+      GCN_PRODUCER_CLIENT_ID: ${{ secrets.GCN_PRODUCER_CLIENT_ID }}
+      GCN_PRODUCER_CLIENT_SECRET: ${{ secrets.GCN_PRODUCER_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          python -c "from snews_data_formats.data import CoincidenceTierAlert"
+
+      - name: Check secrets are set
+        env:
+          HOP_USERNAME: ${{ secrets.HOP_USERNAME }}
+          HOP_PASSWORD: ${{ secrets.HOP_PASSWORD }}
+        run: |
+          missing=0
+          for v in HOP_USERNAME HOP_PASSWORD GCN_PRODUCER_CLIENT_ID GCN_PRODUCER_CLIENT_SECRET; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v is not set"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Write Hopskotch credentials
+        env:
+          HOP_USERNAME: ${{ secrets.HOP_USERNAME }}
+          HOP_PASSWORD: ${{ secrets.HOP_PASSWORD }}
+        run: |
+          # Equivalent of `hop auth add`, non-interactively. hop refuses to read
+          # the file unless its permissions are 0600.
+          mkdir -p ~/.config/hop
+          python - <<'PY'
+          import os, toml
+          path = os.path.expanduser("~/.config/hop/auth.toml")
+          auth = {"auth": [{
+              "username": os.environ["HOP_USERNAME"],
+              "password": os.environ["HOP_PASSWORD"],
+              "protocol": "SASL_SSL",
+              "mechanism": "SCRAM_SHA_512",
+              "hostname": "kafka.scimma.org",
+          }]}
+          fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+          with os.fdopen(fd, "w") as f:
+              toml.dump(auth, f)
+          PY
+
+      - name: Run bridge for the listening window
+        run: |
+          case "$MODE" in
+            test)      flags="--no-firedrill --test" ;;
+            firedrill) flags="--firedrill" ;;
+            real)      flags="--no-firedrill" ;;
+            *) echo "::error::Unknown mode $MODE"; exit 1 ;;
+          esac
+
+          echo "Mode=$MODE  flags=$flags  listen=${LISTEN_MINUTES}m  trigger_test=$TRIGGER_TEST  domain=$GCN_DOMAIN"
+
+          # Own process group, so stopping it also stops the snews_pt child.
+          setsid snews-fireworks-launcher snews2-gcn-bridge $flags > bridge.log 2>&1 &
+          BRIDGE_PID=$!
+          trap 'kill -TERM -- -$BRIDGE_PID 2>/dev/null || true' EXIT
+
+          # Wait (up to 2 min) for snews_pt to report it is subscribed.
+          for i in $(seq 1 120); do
+            grep -q "Broker:" bridge.log && break
+            if ! kill -0 $BRIDGE_PID 2>/dev/null; then
+              echo "::error::Bridge exited before subscribing"; cat bridge.log; exit 1
+            fi
+            sleep 1
+          done
+          grep -q "Broker:" bridge.log || { echo "::error::Bridge never subscribed"; cat bridge.log; exit 1; }
+          echo "Bridge subscribed:"; grep "Broker:" bridge.log
+
+          if [ "$TRIGGER_TEST" = "true" ] && [ "$MODE" = "test" ]; then
+            python scripts/trigger_test_coincidence.py
+          fi
+
+          # Listen, streaming the bridge log into the job output as we go.
+          tail -n +1 -f bridge.log &
+          TAIL_PID=$!
+          sleep $(( LISTEN_MINUTES * 60 ))
+          kill $TAIL_PID 2>/dev/null || true
+
+          kill -TERM -- -$BRIDGE_PID 2>/dev/null || true
+          sleep 5
+
+      - name: Summarize run
+        if: always()
+        run: |
+          [ -f bridge.log ] || { echo "No bridge log"; exit 1; }
+          delivered=$(grep -c "GCN delivery confirmed" bridge.log || true)
+          failed=$(grep -c -E "Failed to process|GCN delivery failed" bridge.log || true)
+          {
+            echo "### SNEWS -> GCN bridge ($MODE)"
+            echo "- Listening window: ${LISTEN_MINUTES} min, GCN domain: \`$GCN_DOMAIN\`"
+            echo "- Notices delivered to GCN: **$delivered**"
+            echo "- Processing failures: **$failed**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed alert(s) failed to reach GCN; see bridge.log"; exit 1
+          fi
+          if [ "$TRIGGER_TEST" = "true" ] && [ "$MODE" = "test" ] && [ "$delivered" -eq 0 ]; then
+            echo "::error::Test coincidence was sent but no notice reached GCN (is the SNEWS dev coincidence server running?)"
+            exit 1
+          fi
+
+      - name: Upload bridge log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-log-${{ github.run_id }}
+          path: bridge.log
+          if-no-files-found: ignore
