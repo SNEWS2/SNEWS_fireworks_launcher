@@ -38,7 +38,7 @@ python -m venv venv && source venv/bin/activate
 pip install -e ".[test]"
 ```
 
-> **Stale `snews-data-formats`:** the fork branch pinned in `pyproject.toml` does not bump its version string, so `pip install --upgrade` may keep an older copy. If `from snews_data_formats.data import CoincidenceTierAlert` fails, force a reinstall:
+> **Stale `snews-data-formats`:** the fork branch pinned in `pyproject.toml` does not bump its version string, so `pip install --upgrade` may keep an older copy. If `from snews.models.messages import CoincidenceTierAlert` fails, force a reinstall:
 > ```bash
 > pip install --force-reinstall --no-deps "snews-data-formats @ git+https://github.com/medhansh29/snews-data-formats.git@feat/add-coincidence-tier-alert"
 > ```
