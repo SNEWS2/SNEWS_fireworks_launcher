@@ -28,7 +28,7 @@ def _now_iso() -> str:
 
 
 GCN_SNEWS2_SCHEMA_ID = (
-    "https://gcn.nasa.gov/schema/main/gcn/notices/snews2/coincidence.schema.json"
+    "https://gcn.nasa.gov/schema/v7.3.0/gcn/notices/snews2/coincidence.schema.json" #instead of main use v7.3.0
 )
 
 
